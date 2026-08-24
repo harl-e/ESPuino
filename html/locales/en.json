@@ -19,7 +19,8 @@
 		"success": "Action performed successfully.",
 		"dropout": "slow stream, dropouts are possible.",
 		"saved": "Settings saved.",
-		"ledCountRestart": "The number of LEDs was changed. ESPuino will restart to apply it."
+		"ledCountRestart": "The number of LEDs was changed. ESPuino will restart to apply it.",
+		"settingsInvalid": "Cannot save: please correct these settings first ({{fields}})."
 	},
 	"status": {
 		"connected": "Connection to ESPuino: OK",
@@ -35,6 +36,7 @@
 		"general": "General",
 		"updates": "Updates",
 		"tools": "Tools",
+		"mediahub": "MediaHub",
 		"help": "Help"
 	},
 	"settingsex": {
@@ -213,6 +215,14 @@
 	"files": {
 		"title": "Files",
 		"loading": "Please wait...",
+		"storage": {
+			"title": "Storage",
+			"loading": "Loading storage usage...",
+			"usage": "{{used}} of {{total}} used · {{free}} free",
+			"unavailable": "No SD card available",
+			"statsUnavailable": "SD card detected, but storage size could not be determined",
+			"error": "Storage usage could not be loaded"
+		},
 		"context": {
 			"newFolder": "New Folder",
 			"play": "Play",
@@ -275,9 +285,31 @@
 					"13": "🎲📁 All tracks of a random subdirectory (sorted)",
 					"14": "🎲📁🔀 All tracks of a random subdirectory (random)",
 					"8": "📻 Webradio",
-					"11": "📃 List (files from SD and/or webstreams) from local .m3u-File"
+					"11": "📃 List (files from SD and/or webstreams) from local .m3u-File",
+					"18": "🌐 MediaHub (content/mode comes from the selected media server)",
+					"19": "Timed release"
 				},
-				"error": "Invalid playmode"
+				"error": "Invalid playmode",
+				"timeRelease": {"start": "Start date and time", "interval": "Interval", "minutes": "Minutes", "hours": "Hours", "days": "Days", "weeks": "Weeks", "months": "Months", "error": "Choose a start date and a positive interval."}
+			},
+			"mediahub": {
+				"serverSelect": {
+					"title": "Media server"
+				},
+				"name": {
+					"title": "Display name",
+					"explanation": "Freely chosen name shown for this media server in the selection dropdown."
+				},
+				"hostPort": {
+					"title": "Address",
+					"explanation": "Host and port of the MediaHub server, e.g. 192.168.1.50:8080.",
+					"placeholder": "e.g. 192.168.1.50:8080"
+				},
+				"addButton": "Save media server",
+				"delete": {
+					"title": "Delete media server?",
+					"prompt": "Really delete the media server \"{{name}}\"? Cards already assigned to it are left unchanged."
+				}
 			},
 			"mod": {
 				"title": "Modification",
@@ -304,6 +336,7 @@
 					"153": "💡 Toggle Ambient Light",
 					"154": "🔆 LED brightness up",
 					"155": "🔅 LED brightness down",
+					"156": "🌐 Synchronize MediaHub content",
 					"0": "🗑 Remove assignment",
 					"170": "⏯ Toggle Play/Pause",
 					"171": "⏮ Previous track",
@@ -618,6 +651,25 @@
 				"fetchError": "Could not fetch the firmware list."
 			}
 		}
+	},
+	"mediahub": {
+		"title": "MediaHub",
+		"intro": "MediaHub is an optional, separately-run add-on: a small local server running as a Docker container on your own network. It lets you manage RFID card assignments centrally for multiple ESPuinos - content and playback mode then come from the server instead of the local NVS configuration. Without a running MediaHub server, this page doesn't do anything useful. Here you register the address(es) of your MediaHub server(s) so they show up in the dropdown when assigning a card.",
+		"serversTitle": "Add media server",
+		"registeredServersTitle": "Registered media servers",
+		"autoSyncEnabled": "Provision unknown MediaHub cards automatically",
+		"autoSyncExplanation": "Checks registered MediaHubs only for RFID cards without a local assignment, then saves a match locally. Known cards are not synchronized automatically.",
+		"visibleStorageEnabled": "Store MediaHub files visibly",
+		"visibleStorageExplanation": "Changes only the MediaHub file location; it does not enable automatic synchronization.",
+		"aliasLabel": "MediaHub ID / folder name",
+		"aliasPlaceholder": "e.g. Living room",
+		"aliasExplanation": "Optional; used only for future visible-storage paths. Changing it never moves existing folders.",
+		"maintenanceTitle": "Local MediaHub data",
+		"maintenanceExplanation": "Maintenance affects only hidden MediaHub cache data. Visible MediaHub files and RFID assignments are never changed.",
+		"cleanupOrphansButton": "Clean up orphaned local MediaHub data",
+		"cleanupAllButton": "Delete all local MediaHub cache data",
+		"cleanupOrphansConfirm": "Hidden MediaHub data no longer referenced by active RFID assignments will be removed.",
+		"cleanupAllConfirm": "All hidden local MediaHub manifests and cache data will be deleted. Visible MediaHub files and RFID assignments remain unchanged."
 	},
 	"help": {
 		"forum": {

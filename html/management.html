@@ -54,6 +54,17 @@
 			height: 200px;
 		}
 
+		.sd-card-info {
+			border: 1px solid var(--bs-border-color, #dee2e6);
+			border-radius: 0.5rem;
+			padding: 0.75rem 1rem;
+			background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.03));
+		}
+
+		.sd-card-progress {
+			height: 0.75rem;
+		}
+
 		.slider-container {
 			width: 100%;
 			display: flex;
@@ -120,6 +131,78 @@
 			border: 1px solid var(--bs-border-color);
 			border-radius: 0.75rem;
 			padding: 1rem 1.25rem;
+		}
+
+		/* File upload controls must be allowed to shrink inside flex layouts.
+		   On phones, stack file selector and submit button so they never overflow the card. */
+		.file-upload-row {
+			display: flex;
+			gap: 0.5rem;
+			min-width: 0;
+		}
+
+		.file-upload-row > input[type="file"] {
+			flex: 1 1 0;
+			min-width: 0;
+			max-width: 100%;
+		}
+
+		.file-upload-row > button {
+			flex: 0 0 auto;
+		}
+
+		@media (max-width: 575.98px) {
+			.file-upload-row {
+				flex-direction: column;
+			}
+
+			.file-upload-row > input[type="file"],
+			.file-upload-row > button {
+				width: 100%;
+			}
+
+			/* Keep the long auto-save description readable on phones.
+			   The interval control moves to a second row instead of forcing
+			   label, number, unit and help icon into one over-wide flex row. */
+			.save-play-pos-interval-row {
+				display: grid !important;
+				grid-template-columns: auto auto auto minmax(0, 1fr);
+				align-items: center;
+				column-gap: 0.5rem;
+				row-gap: 0.35rem;
+				min-width: 0;
+			}
+
+			.save-play-pos-interval-row > #savePlayPosIntervalEnabled {
+				grid-column: 1;
+				grid-row: 1;
+				align-self: start;
+				margin-top: 0.3rem;
+			}
+
+			.save-play-pos-interval-row > label[for="savePlayPosIntervalEnabled"] {
+				grid-column: 2 / -1;
+				grid-row: 1;
+				min-width: 0;
+			}
+
+			.save-play-pos-interval-row > #savePlayPosInterval {
+				grid-column: 2;
+				grid-row: 2;
+				width: 4.25em !important;
+				max-width: 4.25em;
+			}
+
+			.save-play-pos-interval-row > label[for="savePlayPosInterval"] {
+				grid-column: 3;
+				grid-row: 2;
+			}
+
+			.save-play-pos-interval-row > a {
+				grid-column: 4;
+				grid-row: 2;
+				justify-self: start;
+			}
 		}
 
 		.slider-step-row > .slider-container,
@@ -513,6 +596,22 @@
 			</div>
 		</div>
 	</div>
+	<!-- Modal dialog for delete MediaHub server-->
+	<div class="modal fade" data-bs-backdrop="static" id="deleteMediaHubServerModal" role="dialog">
+		<div class="modal-dialog" role="document">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" data-i18n="files.rfid.mediahub.delete.title"></h5>
+				</div>
+				<div class="modal-body">
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-primary" data-bs-dismiss="modal" data-i18n="cancel"></button>
+					<a class="btn btn-danger btn-ok" data-i18n="delete"></a>
+				</div>
+			</div>
+		</div>
+	</div>
 	<!-- Modal dialog for delete NVS RFID assignment-->
 	<div class="modal fade" data-bs-backdrop="static" id="deleteRFIDModal" role="dialog">
 		<div class="modal-dialog" role="document">
@@ -608,6 +707,9 @@
 			<a class="nav-item nav-link main-tab-item" id="nav-tools-tab" data-bs-toggle="tab" href="#nav-tools"
 				data-bs-target="#nav-tools" role="tab" aria-controls="nav-tools" aria-selected="false"><i
 					class="fas fa-wrench"></i><span data-i18n="nav.tools"></span></a>
+			<a class="nav-item nav-link main-tab-item" id="nav-mediahub-tab" data-bs-toggle="tab" href="#nav-mediahub"
+				data-bs-target="#nav-mediahub" role="tab" aria-controls="nav-mediahub" aria-selected="false"><i
+					class="fas fa-hard-drive"></i><span data-i18n="nav.mediahub"></span></a>
 			<a class="nav-item nav-link main-tab-item" id="nav-help-tab" data-bs-toggle="tab" href="#nav-help"
 				data-bs-target="#nav-help" role="tab" aria-controls="nav-help" aria-selected="false"><i
 					class="fas fa-comment"></i><span class=".d-sm-none .d-md-block"><span
@@ -910,6 +1012,19 @@
 			<div class="container" id="filetreeContainer">
 				<fieldset>
 					<legend id="fileslegend" data-i18n="files.title"></legend>
+					<div id="sdCardInfo" class="sd-card-info mb-3" aria-live="polite">
+						<div class="d-flex justify-content-between align-items-center mb-1">
+							<span class="fw-semibold"><i class="fas fa-sd-card"></i><span id="sdCardName"
+									data-i18n="files.storage.title"></span></span>
+							<span id="sdCardPercent" class="fw-semibold">--</span>
+						</div>
+						<div class="progress sd-card-progress">
+							<div id="sdCardProgressBar" class="progress-bar" role="progressbar" style="width: 0%"
+								aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+						</div>
+						<div id="sdCardDetails" class="small text-body-secondary mt-1"
+							data-i18n="files.storage.loading"></div>
+					</div>
 					<div class="filetree-container">
 						<div id="filebrowser">
 							<div class="filetree filetree-size" id="explorerTree"></div>
@@ -1024,7 +1139,23 @@
 										</option>
 										<option class="option-stream" value="11"
 											data-i18n="files.rfid.playmode.mode.11"></option>
+										<option class="option-mediahub" value="18"
+											data-i18n="files.rfid.playmode.mode.18"></option>
+										<option class="option-folder" value="19"
+											data-i18n="files.rfid.playmode.mode.19"></option>
 									</select>
+									<div id="timeReleaseDiv" style="display:none">
+										<label for="timeReleaseStart" data-i18n="files.rfid.playmode.timeRelease.start"></label>
+										<input class="form-control" type="datetime-local" id="timeReleaseStart">
+										<label for="timeReleaseInterval" data-i18n="files.rfid.playmode.timeRelease.interval"></label>
+										<div class="input-group"><input class="form-control" type="number" min="1" step="1" value="1" id="timeReleaseInterval"><select class="form-select" id="timeReleaseUnit"><option value="minutes" data-i18n="files.rfid.playmode.timeRelease.minutes">Minutes</option><option value="hours" data-i18n="files.rfid.playmode.timeRelease.hours">Hours</option><option value="days" selected data-i18n="files.rfid.playmode.timeRelease.days">Days</option><option value="weeks" data-i18n="files.rfid.playmode.timeRelease.weeks">Weeks</option><option value="months" data-i18n="files.rfid.playmode.timeRelease.months">Months</option></select></div>
+									</div>
+									<div id="mediaHubServerDiv" style="display:none">
+										<label for="mediaHubServerSelect"
+											data-i18n="files.rfid.mediahub.serverSelect.title"></label>
+										<select class="form-control form-select" id="mediaHubServerSelect"
+											name="mediaHubServerSelect"></select>
+									</div>
 								</div>
 								<div class="tab-pane" id="rfidmod" role="tabpanel">
 									<label for="modId" data-i18n="files.rfid.mod.title"></label>
@@ -1315,7 +1446,8 @@
 			<div class="tab-pane main-tab-pane fade mb-4" id="nav-general" role="tabpanel"
 				aria-labelledby="nav-general-tab">
 				<div class="container" id="generalConfig">
-					<form action="#generalConfig" method="POST" onsubmit="genSettings('generalConfig'); return false">
+					<form action="#generalConfig" method="POST" novalidate
+						onsubmit="if (validateSettingsForm(this)) { genSettings('generalConfig'); } return false">
 					<div class="nav nav-tabs" id="GeneralSubTab" role="tablist">
 						<a class="nav-item nav-link active" id="general-playback-tab" data-bs-toggle="tab"
 							href="#general-playback" role="tab"><i class="fas fa-volume-up"></i><span
@@ -1458,7 +1590,7 @@
 									data-i18n="[data-bs-content]general.options.savePlayPosRfidChangeExp"
 									tabindex="0"><i class="fas fa-circle-question"></i></a>
 							</div>
-							<div class="d-flex gap-2 align-items-center">
+							<div class="d-flex gap-2 align-items-center save-play-pos-interval-row">
 								<input type="checkbox" id="savePlayPosIntervalEnabled"
 									name="savePlayPosIntervalEnabled" value="false">
 								<label for="savePlayPosIntervalEnabled"
@@ -1891,7 +2023,7 @@
 						</div>
 						<div class="tab-pane fade" id="general-led" role="tabpanel">
 					<div class="col-md-12 mb-4" id="neopixelConfig" data-visible="false">
-						<fieldset>
+						<fieldset disabled>
 							<legend class="w-auto" data-i18n="general.neopixel.title"></legend>
 							<div class="settings-group-card">
 							<div class="row mb-2 align-items-center">
@@ -2168,7 +2300,7 @@
 						</fieldset>
 					</div>
 					<div class="col-md-12 mb-4" id="batteryConfig" data-visible="false">
-						<fieldset>
+						<fieldset disabled>
 							<legend data-i18n="general.battery.title">Batterie</legend>
 							<div class="settings-group-card">
 							<div class="row mb-2 align-items-center">
@@ -2277,7 +2409,7 @@
 									data-i18n="[data-bs-content]general.battery.shutdownOnCriticalExp" tabindex="0"><i
 										class="fas fa-circle-question"></i></a>
 							</div>
-							<div id="criticalVoltageSection" class="row mb-2 align-items-center" data-visible="false">
+							<fieldset id="criticalVoltageSection" class="row mb-2 align-items-center" data-visible="false" disabled>
 								<div class="col-sm-4 d-flex align-items-center gap-2">
 									<label for="criticalVoltage" class="col-form-label"
 										data-i18n="general.battery.criticalShutoff"></label>
@@ -2301,7 +2433,7 @@
 										</div>
 									</div>
 								</div>
-							</div>
+							</fieldset>
 							</div>
 						</fieldset>
 					</div>
@@ -2345,7 +2477,7 @@
 							onsubmit="uploadNVSRFID('nvsUpload'); return false">
 							<div class="mb-3">
 								<label for="nvsUpload" data-i18n="tools.nvs.import.desc"></label><br><br>
-								<div class="d-flex gap-2">
+								<div class="file-upload-row">
 									<input type="file" class="form-control-file btn btn-primary" id="nvsUpload"
 										name="nvsUpload" accept=".txt">
 									<button type="submit" class="btn btn-primary" data-i18n="tools.nvs.import.button"></button>
@@ -2374,7 +2506,7 @@
 				<form id="firmwareUploadForm" method="POST" enctype="multipart/form-data" action="/update">
 					<div class="mb-3">
 						<label for="firmwareUpload" data-i18n="tools.fwupdate.desc"></label><br><br>
-						<div class="d-flex gap-2">
+						<div class="file-upload-row">
 							<input type="file" class="form-control-file btn btn-primary" id="firmwareUpload"
 								name="firmwareUpload" accept=".bin">
 							<button type="submit" class="btn btn-primary" data-i18n="tools.fwupdate.button"></button>
@@ -2417,6 +2549,108 @@
 				</div>
 			</div>
 		</div>
+		<!-- ### Tab MediaHub ### -->
+		<div class="tab-pane main-tab-pane fade mb-4" id="nav-mediahub" role="tabpanel"
+			aria-labelledby="nav-mediahub-tab">
+			<div class="container" id="mediaHubIntro">
+				<legend data-i18n="mediahub.title"></legend>
+				<p data-i18n="mediahub.intro"></p>
+			</div>
+			<div class="container mt-5" id="mediaHubServers">
+				<div class="settings-group-card mb-3">
+					<div class="form-check form-switch">
+						<input class="form-check-input" type="checkbox" id="mediaHubAutoSyncEnabled">
+						<label class="form-check-label" for="mediaHubAutoSyncEnabled" data-i18n="mediahub.autoSyncEnabled"></label>
+					</div>
+					<small class="form-text text-muted" data-i18n="mediahub.autoSyncExplanation"></small>
+				</div>
+				<div class="settings-group-card mb-3">
+					<div class="form-check form-switch">
+						<input class="form-check-input" type="checkbox" id="mediaHubVisibleStorageEnabled">
+						<label class="form-check-label" for="mediaHubVisibleStorageEnabled" data-i18n="mediahub.visibleStorageEnabled"></label>
+					</div>
+					<small class="form-text text-muted" data-i18n="mediahub.visibleStorageExplanation"></small>
+				</div>
+				<fieldset>
+					<legend data-i18n="mediahub.serversTitle"></legend>
+					<form action="#mediaHubServers" method="POST"
+						onsubmit="mediaHubServerConfig('mediaHubServers'); return false">
+						<div class="settings-group-card">
+						<div class="mb-3 col-md-12">
+							<div class="row mb-2 align-items-center">
+								<div class="col-sm-4 d-flex align-items-center gap-2">
+									<label for="mediaHubServerName" class="col-form-label"
+										data-i18n="[prepend]files.rfid.mediahub.name.title">:</label>
+									<a href="#" class="link-secondary" data-bs-toggle="popover"
+										data-i18n="[data-bs-content]files.rfid.mediahub.name.explanation" tabindex="0"><i
+											class="fas fa-circle-question"></i></a>
+								</div>
+								<div class="col-sm-8">
+									<input type="text" class="form-control" id="mediaHubServerName"
+										name="mediaHubServerName" maxlength="32" required>
+								</div>
+							</div>
+							<div class="row mb-2 align-items-center">
+								<div class="col-sm-4 d-flex align-items-center gap-2">
+									<label for="mediaHubServerHostPort" class="col-form-label"
+										data-i18n="[prepend]files.rfid.mediahub.hostPort.title">:</label>
+									<a href="#" class="link-secondary" data-bs-toggle="popover"
+										data-i18n="[data-bs-content]files.rfid.mediahub.hostPort.explanation"
+										tabindex="0"><i class="fas fa-circle-question"></i></a>
+								</div>
+								<div class="col-sm-8">
+									<div class="input-group">
+										<select class="form-select flex-grow-0 w-auto" id="mediaHubServerScheme"
+											name="mediaHubServerScheme">
+											<option value="http">http://</option>
+											<option value="https">https://</option>
+										</select>
+									<input type="text" class="form-control" id="mediaHubServerHostPort"
+										name="mediaHubServerHostPort"
+										data-i18n="[placeholder]files.rfid.mediahub.hostPort.placeholder"
+										maxlength="64" required>
+									</div>
+								</div>
+							</div>
+							<div class="row mb-2 align-items-center">
+								<div class="col-sm-4">
+									<label for="mediaHubServerAlias" class="col-form-label"
+										data-i18n="mediahub.aliasLabel"></label>
+								</div>
+								<div class="col-sm-8">
+									<input type="text" class="form-control" id="mediaHubServerAlias" name="mediaHubServerAlias"
+										maxlength="64" data-i18n="[placeholder]mediahub.aliasPlaceholder">
+									<small class="form-text text-muted" data-i18n="mediahub.aliasExplanation"></small>
+								</div>
+							</div>
+						</div>
+						<div>
+							<button type="submit" class="btn btn-primary"
+								data-i18n="files.rfid.mediahub.addButton"></button>
+						</div>
+						</div>
+					</form>
+					<div class="col-md-12" style="margin-top: 20px;">
+						<legend data-i18n="mediahub.registeredServersTitle"></legend>
+						<div class="settings-group-card">
+						<ul class="list-group" id="mediaHubServerListManaged"></ul>
+						</div>
+					</div>
+				</fieldset>
+				<fieldset class="mt-4">
+					<legend data-i18n="mediahub.maintenanceTitle"></legend>
+					<div class="settings-group-card">
+						<p class="form-text text-muted" data-i18n="mediahub.maintenanceExplanation"></p>
+						<div class="button-group">
+							<button type="button" class="btn btn-warning" onclick="mediaHubCleanupOrphans()"
+								data-i18n="mediahub.cleanupOrphansButton"></button>
+							<button type="button" class="btn btn-danger" onclick="mediaHubCleanupAll()"
+								data-i18n="mediahub.cleanupAllButton"></button>
+						</div>
+					</div>
+				</fieldset>
+			</div>
+		</div>
 		<!-- ### Tab Help ### -->
 		<div class="tab-pane main-tab-pane fade mb-4" id="nav-help" role="tabpanel" aria-labelledby="nav-help-tab">
 			<div class="container" id="divForum">
@@ -2437,16 +2671,30 @@
 		// last known-saved led count, to detect a change on save (device restarts to apply it)
 		var lastNumIndicatorLeds = null;
 		var lastNumControlLeds = null;
+		var lastSdCardInfo = null;
 		var host = $(location).attr('hostname');
 		var currentOpMode = 0;
 		var language = navigator.language || navigator.userLanguage;
 		var localize;
+		function updateTimeReleaseUnitLabels() {
+			const labels = {
+				minutes: 'files.rfid.playmode.timeRelease.minutes', hours: 'files.rfid.playmode.timeRelease.hours',
+				days: 'files.rfid.playmode.timeRelease.days', weeks: 'files.rfid.playmode.timeRelease.weeks',
+				months: 'files.rfid.playmode.timeRelease.months'
+			};
+			document.querySelectorAll('#timeReleaseUnit option').forEach(option => {
+				option.textContent = i18next.t(labels[option.value]);
+			});
+		}
 		/* show active / selected tab */
 		$('#nav-tab.nav-tabs a').on('shown.bs.tab', function (e) {
 			ActiveTab = $(e.target).attr('id');
 			console.log("ActiveTab: " + ActiveTab);
 			if (ActiveTab == 'nav-control-tab') {
 				getTrackProgress();
+			}
+			if (ActiveTab == 'nav-rfid-tab') {
+				updateSdCardInfo();
 			}
 			localStorage.setItem("active-tab", ActiveTab);
 		});
@@ -2526,6 +2774,57 @@
 		}
 
 
+		/* The settings form spans several tab-panes, and a browser refuses to report a
+		   validation error on a control it cannot focus -- which includes everything in a
+		   hidden pane. Native validation therefore blocks the submit *silently*: the Save
+		   button looks dead and the only clue is "An invalid form control ... is not
+		   focusable" in the console. So the form carries `novalidate` and we check it here
+		   instead: name the offending settings, then open the tab holding the first one so
+		   it can actually be seen and corrected. */
+		function validateSettingsForm(form) {
+			const invalid = Array.from(form.elements)
+				.filter((control) => control.willValidate && !control.validity.valid);
+			if (invalid.length === 0) {
+				return true;
+			}
+
+			const describe = (el) => {
+				const label = el.id ? form.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null;
+				const text = label ? label.textContent.trim() : '';
+				return text || el.name || el.id;
+			};
+			const fields = invalid.map(describe).filter((name, i, all) => name && all.indexOf(name) === i);
+
+			/* Reveal the first offender: show every tab-pane ancestor, outermost first, so
+			   both the main tab and its sub-tab end up active. */
+			const panes = [];
+			for (let pane = invalid[0].closest('.tab-pane'); pane; pane = pane.parentElement ? pane.parentElement.closest('.tab-pane') : null) {
+				panes.unshift(pane);
+			}
+			panes.forEach((pane) => {
+				const link = document.querySelector('[href="#' + pane.id + '"], [data-bs-target="#' + pane.id + '"]');
+				if (link) {
+					bootstrap.Tab.getOrCreateInstance(link).show();
+				}
+			});
+
+			toaster.error(i18next.t("toast.settingsInvalid", { fields: fields.join(', ') }));
+			/* after the tab transition, so the control is visible and focusable */
+			setTimeout(() => {
+				invalid[0].focus();
+				invalid[0].reportValidity();
+			}, 250);
+			return false;
+		}
+
+		function setSettingsSectionActive(section, active) {
+			section.setAttribute('data-visible', active);
+			const fieldset = section.matches('fieldset') ? section : section.querySelector('fieldset');
+			if (fieldset) {
+				fieldset.disabled = !active;
+			}
+		}
+
 		i18next.use(i18nextHttpBackend).init({
 			backend: {
 				loadPath: "http://" + host + "/locales/{{lng}}.json"
@@ -2537,6 +2836,7 @@
 		}, (err, t) => {
 			localize = locI18next.init(i18next);
 			localize('body');
+			updateTimeReleaseUnitLabels();
 			toaster.clear();
 			// change the language if we found it in the local storage
 			const lang = localStorage.getItem("language");
@@ -2550,11 +2850,15 @@
 			document.querySelector('#langSel').value = lng;
 			if (localize) {
 				localize('body');
+				updateTimeReleaseUnitLabels();
 				// (re)initialize all popover buttons to get correct translations in the popovers
 				document.querySelectorAll('[data-bs-toggle="popover"]')
 					.forEach(popoverButton => {
 						new bootstrap.Popover(popoverButton, { html: true, trigger: 'focus' })
 					});
+			}
+			if (lastSdCardInfo !== null) {
+				renderSdCardInfo(lastSdCardInfo);
 			}
 			$('#navMenu').removeClass("show"); // Hide the menu again
 		});
@@ -2606,6 +2910,119 @@
 			});
 		}
 		/* File Explorer functions begin*/
+		function formatStorageBytes(bytes) {
+			var value = Number(bytes);
+			if (!Number.isFinite(value) || value < 0) {
+				return "--";
+			}
+
+			var units = ["B", "KB", "MB", "GB", "TB"];
+			var unitIndex = 0;
+			while (value >= 1000 && unitIndex < units.length - 1) {
+				value /= 1000;
+				unitIndex++;
+			}
+
+			var maximumFractionDigits = 2;
+			if (unitIndex === 0 || value >= 100) {
+				maximumFractionDigits = 0;
+			} else if (value >= 10) {
+				maximumFractionDigits = 1;
+			}
+
+			return value.toLocaleString(i18next.language || undefined, {
+				maximumFractionDigits: maximumFractionDigits
+			}) + " " + units[unitIndex];
+		}
+
+		function renderSdCardInfo(sdCard) {
+			var nameElement = document.getElementById('sdCardName');
+			var percentElement = document.getElementById('sdCardPercent');
+			var detailsElement = document.getElementById('sdCardDetails');
+			var progressElement = document.getElementById('sdCardProgressBar');
+			if (!nameElement || !percentElement || !detailsElement || !progressElement) {
+				return;
+			}
+
+			var title = i18next.t('files.storage.title');
+			nameElement.textContent = title;
+
+			if (sdCard && sdCard.error) {
+				percentElement.textContent = "--";
+				detailsElement.textContent = i18next.t('files.storage.error');
+				progressElement.style.width = "0%";
+				progressElement.setAttribute('aria-valuenow', '0');
+				return;
+			}
+
+			if (!sdCard || !sdCard.available) {
+				percentElement.textContent = "--";
+				detailsElement.textContent = i18next.t('files.storage.unavailable');
+				progressElement.style.width = "0%";
+				progressElement.setAttribute('aria-valuenow', '0');
+				return;
+			}
+
+			var totalBytes = Number(sdCard.totalBytes);
+			if (sdCard.statsAvailable === false || !Number.isFinite(totalBytes) || totalBytes <= 0) {
+				percentElement.textContent = "--";
+				detailsElement.textContent = i18next.t('files.storage.statsUnavailable');
+				progressElement.style.width = "0%";
+				progressElement.setAttribute('aria-valuenow', '0');
+				return;
+			}
+
+			var usedBytes = Number(sdCard.usedBytes);
+			var freeBytes = Number(sdCard.freeBytes);
+			if (!Number.isFinite(usedBytes)) {
+				usedBytes = 0;
+			}
+			if (!Number.isFinite(freeBytes)) {
+				freeBytes = Math.max(0, totalBytes - usedBytes);
+			}
+			usedBytes = Math.min(Math.max(0, usedBytes), totalBytes);
+			freeBytes = Math.min(Math.max(0, freeBytes), totalBytes);
+
+			var fillRatio = Math.min(1, Math.max(0, usedBytes / totalBytes));
+			var fillPercent = fillRatio * 100;
+			percentElement.textContent = fillRatio.toLocaleString(i18next.language || undefined, {
+				style: 'percent',
+				maximumFractionDigits: 1
+			});
+			detailsElement.textContent = i18next.t('files.storage.usage', {
+				used: formatStorageBytes(usedBytes),
+				total: formatStorageBytes(totalBytes),
+				free: formatStorageBytes(freeBytes)
+			});
+			progressElement.style.width = fillPercent.toFixed(1) + "%";
+			progressElement.setAttribute('aria-valuenow', fillPercent.toFixed(1));
+			progressElement.setAttribute('aria-valuetext', detailsElement.textContent);
+		}
+
+		async function updateSdCardInfo() {
+			try {
+				var response = await fetch("http://" + host + "/info?section=sdcard&_=" + Date.now(), {
+					cache: 'no-store'
+				});
+				if (!response.ok) {
+					throw new Error("HTTP " + response.status);
+				}
+				var info = await response.json();
+				if (!info || typeof info !== 'object' || !Object.prototype.hasOwnProperty.call(info, 'sdcard')) {
+					throw new Error("SD card information missing");
+				}
+
+				lastSdCardInfo = info.sdcard;
+				renderSdCardInfo(lastSdCardInfo);
+			} catch (error) {
+				console.warn("Could not load SD card usage:", error);
+				lastSdCardInfo = {
+					error: true
+				};
+				renderSdCardInfo(lastSdCardInfo);
+			}
+		}
+
 		var lastSelectedNodePath = "";
 		$('#explorerTree').on('select_node.jstree', function (e, data) {
 			$('input[name=fileOrUrl]').val(data.node.data.path);
@@ -2640,14 +3057,38 @@
 			}
 		});
 		/* Webradio (mode 8) needs a URL, not a file/folder path - prefill "http://" when switching
-		   to it, and restore the file browser's current selection when switching away again */
+		   to it, and restore the file browser's current selection when switching away again.
+		   MediaHub (mode 18) derives fileOrUrl entirely from the server dropdown, so it's made
+		   read-only while that mode is selected instead of being hand-edited. */
 		$('#playMode').on('change', function () {
 			if (this.value === '8') {
 				$('#fileOrUrl').val('http://');
+				$('#fileOrUrl').prop('readonly', false);
+				$('#mediaHubServerDiv').hide();
+				$('#timeReleaseDiv').hide();
+			} else if (this.value === '18') {
+				$('#fileOrUrl').prop('readonly', true);
+				$('#mediaHubServerDiv').show();
+				$('#timeReleaseDiv').hide();
+				updateFileOrUrlFromMediaHubServer();
+			} else if (this.value === '19') {
+				$('#fileOrUrl').prop('readonly', false);
+				$('#mediaHubServerDiv').hide();
+				$('#timeReleaseDiv').show();
+				updateTimeReleaseUnitLabels();
 			} else {
 				$('#fileOrUrl').val(lastSelectedNodePath || '/');
+				$('#fileOrUrl').prop('readonly', false);
+				$('#mediaHubServerDiv').hide();
+				$('#timeReleaseDiv').hide();
 			}
 		});
+		function updateFileOrUrlFromMediaHubServer() {
+			// the option's value is already "scheme://host:port" (see rebuildMediaHubServerList)
+			let base = $('#mediaHubServerSelect').val();
+			$('#fileOrUrl').val(base ? ('mediahub://' + base) : '');
+		}
+		$('#mediaHubServerSelect').on('change', updateFileOrUrlFromMediaHubServer);
 
 		function doRest(path, callback, obj) {
 			obj.url = path;
@@ -2686,7 +3127,10 @@
 		function deleteData(path, callback, _data) {
 			doRest(path, callback, {
 				method: "DELETE",
-				data: _data
+				data: _data,
+				complete: function () {
+					updateSdCardInfo();
+				}
 			});
 		} /* deleteData */
 		function patchData(path, callback, _data) {
@@ -2704,7 +3148,10 @@
 		function putData(path, callback, _data) {
 			doRest(path, callback, {
 				method: "PUT",
-				data: _data
+				data: _data,
+				complete: function () {
+					updateSdCardInfo();
+				}
 			});
 		} /* putData */
 		async function restartDevice() {
@@ -3112,6 +3559,7 @@
 					addFileDirectory(sel, data);
 					ref.open_node(sel);
 				});
+				updateSdCardInfo();
 			}
 
 			// Files upload one at a time (the shared double-buffer/writer-task
@@ -3371,6 +3819,7 @@
 							icon: "fas fa-sync",
 							action: function (x) {
 								refreshNode(nodeId);
+								updateSdCardInfo();
 							}
 						};
 						/* Delete */
@@ -3875,7 +4324,7 @@
 			// led
 			let ledSettings = settings.led;
 			if (ledSettings) {
-				document.getElementById('neopixelConfig').setAttribute('data-visible', true);
+				setSettingsSectionActive(document.getElementById('neopixelConfig'), true);
 				$('#initBrightness').bootstrapSlider('setValue', ledSettings.initBrightness);
 				$('#nightBrightness').bootstrapSlider('setValue', ledSettings.nightBrightness);
 				$('#atmoBrightness').bootstrapSlider('setValue', ledSettings.atmoBrightness);
@@ -3955,12 +4404,12 @@
 			// battery
 			let batSettings = settings.battery;
 			if (batSettings) {
-				document.getElementById('batteryConfig').setAttribute('data-visible', true);
+				setSettingsSectionActive(document.getElementById('batteryConfig'), true);
 				$('#warningLowVoltage').bootstrapSlider('setValue', batSettings.warnLowVoltage);
 				$('#voltageIndicatorLow').bootstrapSlider('setValue', batSettings.indicatorLow);
 				$('#voltageIndicatorHigh').bootstrapSlider('setValue', batSettings.indicatorHi);
 				$('#shutdownOnCritical').prop('checked', batSettings.shutdownOnCritical);
-				document.getElementById('criticalVoltageSection').setAttribute('data-visible', batSettings.shutdownOnCritical);
+				setSettingsSectionActive(document.getElementById('criticalVoltageSection'), batSettings.shutdownOnCritical);
 				$('#criticalVoltage').bootstrapSlider('setValue', batSettings.criticalVoltage);
 				$('#voltageCheckInterval').bootstrapSlider('setValue', batSettings.voltageCheckInterval);
 			}
@@ -4078,6 +4527,136 @@
 				method: "DELETE"
 			});
 			await rebuildSSIDList();
+		}
+		// Registered MediaHub servers (concept §5.1): a small local list used purely as
+		// enrollment convenience for the RFID-assignment dropdown - the runtime flow (§11)
+		// never reads it, it only ever fills in the "mediahub://<host:port>" fileOrUrl value.
+		const mediaHubServerListManaged = document.getElementById("mediaHubServerListManaged");
+		const mediaHubServerSelect = document.getElementById("mediaHubServerSelect");
+		const mediaHubAutoSyncEnabled = document.getElementById("mediaHubAutoSyncEnabled");
+		const mediaHubVisibleStorageEnabled = document.getElementById("mediaHubVisibleStorageEnabled");
+		async function rebuildMediaHubToggle(path, control) {
+			const response = await fetch("http://" + host + path);
+			if (response.ok) control.checked = (await response.json()).enabled === true;
+		}
+		async function saveMediaHubToggle(path, control) {
+			const response = await fetch("http://" + host + path, {
+				method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ enabled: control.checked })
+			});
+			if (!response.ok) {
+				toaster.error((await response.text()) || response.statusText);
+				await rebuildMediaHubToggle(path, control);
+				return;
+			}
+			control.checked = (await response.json()).enabled === true;
+		}
+		mediaHubAutoSyncEnabled.addEventListener("change", () => saveMediaHubToggle("/mediahubautosync", mediaHubAutoSyncEnabled));
+		mediaHubVisibleStorageEnabled.addEventListener("change", () => saveMediaHubToggle("/mediahubvisiblestorage", mediaHubVisibleStorageEnabled));
+		async function rebuildMediaHubServerList() {
+			let servers = await (await fetch("http://" + host + "/mediahubservers")).json();
+
+			mediaHubServerSelect.innerHTML = "";
+			for (let index = 0; index < servers.length; index++) {
+				let server = servers[index];
+				// the option's value is the full "scheme://host:port" base: at
+				// assignment time that's exactly what fills the fileOrUrl field
+				// (via mediahub://<value>), the runtime never sees this server list.
+				let base = (server.https ? "https://" : "http://") + server.hostPort;
+				let opt = document.createElement("option");
+				opt.value = base;
+				opt.textContent = server.name + " (" + base + ")";
+				mediaHubServerSelect.appendChild(opt);
+			}
+			if (servers.length === 1) {
+				// only one known hub -> preselect it (concept §5.1)
+				mediaHubServerSelect.selectedIndex = 0;
+			}
+			if ($('#playMode').val() === '18') {
+				updateFileOrUrlFromMediaHubServer();
+			}
+
+			mediaHubServerListManaged.innerHTML = "";
+			for (let index = 0; index < servers.length; index++) {
+				let server = servers[index];
+				let base = (server.https ? "https://" : "http://") + server.hostPort;
+				let elem = document.createElement("li");
+				elem.classList.add("list-group-item");
+				let folder = server.alias || server.hubKey;
+				elem.appendChild(document.createTextNode("#" + server.rank + " " + server.name + " (" + base + ", hub=" + server.hubKey + ", folder=" + folder + ")"));
+				let deleteSpan = document.createElement("span");
+				deleteSpan.classList.add("float-end");
+				deleteSpan.classList.add("button-group");
+				let deleteButton = document.createElement("button");
+				deleteButton.classList.add("btn", "btn-danger", "fa", "fa-trash");
+				deleteButton.setAttribute("data-bs-toggle", "modal");
+				deleteButton.setAttribute("data-bs-target", "#deleteMediaHubServerModal");
+				deleteButton.setAttribute("data-mediahubserver", server.name);
+				deleteSpan.appendChild(deleteButton);
+				for (const [direction, icon, disabled] of [[-1, "fa-arrow-up", index === 0], [1, "fa-arrow-down", index === servers.length - 1]]) {
+					const moveButton = document.createElement("button");
+					moveButton.type = "button";
+					moveButton.classList.add("btn", "btn-secondary", "fa", icon);
+					moveButton.disabled = disabled;
+					moveButton.addEventListener("click", () => moveMediaHubServer(server.name, direction));
+					deleteSpan.appendChild(moveButton);
+				}
+				elem.appendChild(deleteSpan);
+				mediaHubServerListManaged.appendChild(elem);
+			}
+		}
+		async function moveMediaHubServer(name, direction) {
+			const response = await fetch("http://" + host + "/mediahubservers-order", {
+				method: "POST", headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name: name, direction: direction })
+			});
+			if (!response.ok) toaster.error((await response.text()) || response.statusText);
+			else await rebuildMediaHubServerList();
+		}
+		async function deleteMediaHubServer(name) {
+			console.log("deleting mediahub server", name);
+			$('#deleteMediaHubServerModal').modal('hide');
+			await fetch("http://" + host + "/mediahubservers/" + encodeURIComponent(name), {
+				method: "DELETE"
+			});
+			await rebuildMediaHubServerList();
+		}
+		async function mediaHubServerConfig(clickedId) {
+			lastIdclicked = clickedId;
+			var myObj = {
+				name: document.getElementById('mediaHubServerName').value,
+				hostPort: document.getElementById('mediaHubServerHostPort').value,
+				https: document.getElementById('mediaHubServerScheme').value === 'https',
+				alias: document.getElementById('mediaHubServerAlias').value
+			};
+			const response = await fetch("http://" + host + "/mediahubservers", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json"
+				},
+				body: JSON.stringify(myObj)
+			});
+			if (!response.ok) {
+				toaster.error((await response.text()) || response.statusText);
+				return;
+			}
+			toaster.info(i18next.t("toast.saved"));
+			await rebuildMediaHubServerList();
+		}
+		async function mediaHubRunCleanup(path, confirmationKey) {
+			if (!window.confirm(i18next.t(confirmationKey))) return;
+			const response = await fetch("http://" + host + path, { method: "POST" });
+			if (!response.ok) {
+				toaster.error((await response.text()) || response.statusText);
+				return;
+			}
+			toaster.info((await response.text()) || i18next.t("toast.saved"));
+		}
+		function mediaHubCleanupOrphans() {
+			return mediaHubRunCleanup("/mediahubcleanup-orphans", "mediahub.cleanupOrphansConfirm");
+		}
+		function mediaHubCleanupAll() {
+			return mediaHubRunCleanup("/mediahubcleanup-all-hidden", "mediahub.cleanupAllConfirm");
 		}
 		const rfidListSavedAssignments = document.getElementById("rfidListSavedAssignments");
 		async function rebuildRFIDList() {
@@ -4604,6 +5183,16 @@
 						playMode: document.getElementById('playMode').value
 					}
 				};
+				if (myObj.rfidAssign.playMode === '19') {
+					var start = new Date(document.getElementById('timeReleaseStart').value).getTime() / 1000;
+					var intervalValue = Number(document.getElementById('timeReleaseInterval').value), intervalUnit = document.getElementById('timeReleaseUnit').value;
+					var interval = intervalUnit === 'months' ? 0 : intervalValue * {minutes: 60, hours: 3600, days: 86400, weeks: 604800}[intervalUnit];
+					if (!Number.isInteger(start) || start <= 0 || !Number.isInteger(intervalValue) || intervalValue <= 0 || (intervalUnit !== 'months' && (!Number.isInteger(interval) || interval <= 0))) { toaster.error(i18next.t('files.rfid.playmode.timeRelease.error')); return; }
+					myObj.rfidAssign.timeReleaseStart = start;
+					myObj.rfidAssign.timeReleaseInterval = interval;
+					myObj.rfidAssign.timeReleaseIntervalValue = intervalValue;
+					myObj.rfidAssign.timeReleaseIntervalUnit = intervalUnit;
+				}
 			} else {
 				var myObj = {
 					"rfidMod": {
@@ -4892,6 +5481,10 @@
 		$(document).ready(function () {
 			connect();
 			buildFileSystemTree("/");
+			updateSdCardInfo();
+			rebuildMediaHubToggle("/mediahubautosync", mediaHubAutoSyncEnabled);
+			rebuildMediaHubToggle("/mediahubvisiblestorage", mediaHubVisibleStorageEnabled);
+			rebuildMediaHubServerList();
 			// insert MQTT topics preview if not present
 			if ($('#mqttTopicsPreview').length === 0) {
 				var preview = $('<fieldset class="mt-5 mb-3"><legend data-i18n="mqtt.topics.preview"></legend><div class="settings-group-card"><pre id="mqttTopicsPreview" style="white-space:pre-wrap;"></pre></div></fieldset>');
@@ -4909,6 +5502,14 @@
 					ssid: ssid
 				}));
 				$(this).find('.btn-ok').attr('href', "javascript:deleteSSID('" + ssid + "')");
+			})
+			$('#deleteMediaHubServerModal').on('show.bs.modal', function (event) {
+				var name = $(event.relatedTarget).data('mediahubserver')
+				$(this).find('.modal-title').text(i18next.t("files.rfid.mediahub.delete.title"));
+				$(this).find('.modal-body').text(i18next.t("files.rfid.mediahub.delete.prompt", {
+					name: name
+				}));
+				$(this).find('.btn-ok').attr('href', "javascript:deleteMediaHubServer('" + name + "')");
 			})
 			$('#deleteRFIDModal').on('show.bs.modal', function (event) {
 				var rfid = $(event.relatedTarget).data('rfid')
@@ -5027,7 +5628,7 @@
 			   bootstrap-slider mismeasures its width while display:none, so relayout it now that it's visible. */
 			$('#shutdownOnCritical').on('change', function () {
 				const checked = $(this).prop('checked');
-				document.getElementById('criticalVoltageSection').setAttribute('data-visible', checked);
+				setSettingsSectionActive(document.getElementById('criticalVoltageSection'), checked);
 				if (checked) {
 					$('#criticalVoltage').bootstrapSlider('relayout');
 				}
@@ -5150,7 +5751,7 @@
 			const cmdElem = document.createElement('select');
 			const cmdNothing = addOption(cmdElem, 0);
 			cmdNothing.setAttribute('data-i18n', "settingsex.buttons.noaction");
-			const cmds = [170, 171, 172, 173, 174, 184, 185, 175, 176, 177, 178, 179, 180, 181, 182, 183, 199, 130, 140, 141, 142, 150, 151, 152, 153, 154, 155, 120, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250];
+			const cmds = [170, 171, 172, 173, 174, 184, 185, 175, 176, 177, 178, 179, 180, 181, 182, 183, 199, 130, 140, 141, 142, 150, 151, 152, 153, 154, 155, 156, 120, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250];
 			for (const cmd of cmds) {
 				const opt = addOption(cmdElem, cmd);
 				if ([140, 141, 142].includes(cmd)) {
@@ -5171,7 +5772,7 @@
 
 			/* The <select /> that houses all commands for the modification selectors */
 			const modElem = document.createElement('select');
-			const mods = [100, 179, 101, 102, 103, 104, 105, 106, 110, 111, 120, 130, 140, 141, 142, 150, 151, 152, 153, 154, 155, 0, 170, 171, 172, 173, 174, 184, 185, 180, 181, 176, 177, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250];
+			const mods = [100, 179, 101, 102, 103, 104, 105, 106, 110, 111, 120, 130, 140, 141, 142, 150, 151, 152, 153, 154, 155, 156, 0, 170, 171, 172, 173, 174, 184, 185, 180, 181, 176, 177, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250];
 			for (const mod of mods) {
 				const opt = addOption(modElem, mod);
 				if ([140, 141, 142].includes(mod)) {

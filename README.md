@@ -343,6 +343,7 @@ modification:
 | Toggle through the different modes | Normal => BT-Sink => BT-Source => Normal |
 | Speech output of IP-address or current time | Speech output of IP address or current time |
 | Toggle Ambient Light | Enables / disables ambient light |
+| Synchronize MediaHub content | Explicitly updates all locally provisioned MediaHub manifests; it does not start playback |
 
 > :information_source: All sleep modes do dimming (Neopixel) automatically because it's supposed to
   be used in the evening when going to bed. Well, at least that's my children's indication :-)

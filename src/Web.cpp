@@ -18,6 +18,7 @@
 #include "HallEffectSensor.h"
 #include "Led.h"
 #include "Log.h"
+#include "MediaHub.h"
 #include "MemX.h"
 #include "Mqtt.h"
 #include "Rfid.h"
@@ -102,6 +103,16 @@ static void handleWiFiScanRequest(AsyncWebServerRequest *request);
 static void handleGetRFIDRequest(AsyncWebServerRequest *request);
 static void handlePostRFIDRequest(AsyncWebServerRequest *request, JsonVariant &json);
 static void handleDeleteRFIDRequest(AsyncWebServerRequest *request);
+static void handleGetMediaHubServers(AsyncWebServerRequest *request);
+static void handlePostMediaHubServers(AsyncWebServerRequest *request, JsonVariant &json);
+static void handlePostMediaHubServersOrder(AsyncWebServerRequest *request, JsonVariant &json);
+static void handleDeleteMediaHubServers(AsyncWebServerRequest *request);
+static void handleGetMediaHubAutoSync(AsyncWebServerRequest *request);
+static void handlePostMediaHubAutoSync(AsyncWebServerRequest *request, JsonVariant &json);
+static void handleGetMediaHubVisibleStorage(AsyncWebServerRequest *request);
+static void handlePostMediaHubVisibleStorage(AsyncWebServerRequest *request, JsonVariant &json);
+static void handlePostMediaHubCleanupAll(AsyncWebServerRequest *request);
+static void handlePostMediaHubCleanupOrphans(AsyncWebServerRequest *request);
 static void handleGetInfo(AsyncWebServerRequest *request);
 static void handleGetSettings(AsyncWebServerRequest *request);
 static void handlePostSettings(AsyncWebServerRequest *request, JsonVariant &json);
@@ -606,6 +617,19 @@ void webserverStart(void) {
 		wServer.addRewrite(new OneParamRewrite("/rfid/{id}", "/rfid?id={id}"));
 		wServer.on("/rfid", HTTP_DELETE, handleDeleteRFIDRequest);
 
+		// MediaHub registered servers (concept §5.1)
+		wServer.on("/mediahubservers-order", HTTP_POST, handlePostMediaHubServersOrder);
+		wServer.on("/mediahubservers", HTTP_GET, handleGetMediaHubServers);
+		wServer.addHandler(new AsyncCallbackJsonWebHandler("/mediahubservers", handlePostMediaHubServers));
+		wServer.addRewrite(new OneParamRewrite("/mediahubservers/{name}", "/mediahubservers?name={name}"));
+		wServer.on("/mediahubservers", HTTP_DELETE, handleDeleteMediaHubServers);
+		wServer.on("/mediahubautosync", HTTP_GET, handleGetMediaHubAutoSync);
+		wServer.addHandler(new AsyncCallbackJsonWebHandler("/mediahubautosync", handlePostMediaHubAutoSync));
+		wServer.on("/mediahubvisiblestorage", HTTP_GET, handleGetMediaHubVisibleStorage);
+		wServer.addHandler(new AsyncCallbackJsonWebHandler("/mediahubvisiblestorage", handlePostMediaHubVisibleStorage));
+		wServer.on("/mediahubcleanup-all-hidden", HTTP_POST, handlePostMediaHubCleanupAll);
+		wServer.on("/mediahubcleanup-orphans", HTTP_POST, handlePostMediaHubCleanupOrphans);
+
 		// WiFi scan
 		wServer.on("/wifiscan", HTTP_GET, handleWiFiScanRequest);
 
@@ -746,14 +770,16 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		// so reject it before writing anything. The HTML input already constrains this, but a direct
 		// REST/websocket POST could bypass that.
 		const uint8_t minVolume = generalObj["minVolume"].as<uint8_t>();
-		if (minVolume >= generalObj["maxVolumeSp"].as<uint8_t>() || minVolume >= generalObj["maxVolumeHp"].as<uint8_t>()) {
+		const uint8_t maxVolumeSp = generalObj["maxVolumeSp"].as<uint8_t>();
+		const uint8_t maxVolumeHp = generalObj["maxVolumeHp"].as<uint8_t>();
+		if (minVolume >= maxVolumeSp || minVolume >= maxVolumeHp) {
 			Log_Println(webSaveSettingsVolumeMinMaxError, LOGLEVEL_ERROR);
 			return WebsocketCodeType::Error;
 		}
 		bool success = (gPrefsSettings.putUInt("initVolume", generalObj["initVolume"].as<uint8_t>()) != 0);
 		success = success && (gPrefsSettings.putUInt("minVolume", minVolume) != 0);
-		success = success && (gPrefsSettings.putUInt("maxVolumeSp", generalObj["maxVolumeSp"].as<uint8_t>()) != 0);
-		success = success && (gPrefsSettings.putUInt("maxVolumeHp", generalObj["maxVolumeHp"].as<uint8_t>()) != 0);
+		success = success && (gPrefsSettings.putUInt("maxVolumeSp", maxVolumeSp) != 0);
+		success = success && (gPrefsSettings.putUInt("maxVolumeHp", maxVolumeHp) != 0);
 		success = success && (gPrefsSettings.putUInt("mInactiviyT", generalObj["sleepInactivity"].as<uint8_t>()) != 0);
 		if (generalObj["rotSeekStep"].is<uint8_t>()) {
 			success = success && (gPrefsSettings.putUChar("rotSeekStep", generalObj["rotSeekStep"].as<uint8_t>()) != 0);
@@ -783,6 +809,10 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 			Log_Printf(LOGLEVEL_ERROR, webSaveSettingsError, "general");
 			return WebsocketCodeType::Error;
 		}
+
+		// Apply the new maximum-volume limits immediately; no reboot is required.
+		AudioPlayer_ApplyMaxVolumes(maxVolumeSp, maxVolumeHp);
+
 		gPlayProperties.newPlayMono = generalObj["playMono"].as<bool>();
 		gPlayProperties.SavePlayPosRfidChange = generalObj["savePosRfidChge"].as<bool>();
 		gPlayProperties.pauseOnMinVolume = generalObj["pauseOnMinVol"].as<bool>();
@@ -1065,8 +1095,22 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 			Log_Println("rfidAssign: Invalid playmode", LOGLEVEL_ERROR);
 			return WebsocketCodeType::Error;
 		}
-		char rfidString[275];
-		snprintf(rfidString, sizeof(rfidString) / sizeof(rfidString[0]), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter);
+		const uint32_t start = doc["rfidAssign"]["timeReleaseStart"] | 0;
+		const uint32_t interval = doc["rfidAssign"]["timeReleaseInterval"] | 0;
+		const uint32_t intervalValue = doc["rfidAssign"]["timeReleaseIntervalValue"] | 0;
+		const char *intervalUnit = doc["rfidAssign"]["timeReleaseIntervalUnit"] | "";
+		const bool months = strcmp(intervalUnit, "months") == 0;
+		if (_playMode == TIME_RELEASE && (start == 0 || (months ? intervalValue == 0 : interval == 0))) {
+			Log_Println("TIME_RELEASE requires a start time and positive interval", LOGLEVEL_ERROR);
+			return WebsocketCodeType::Error;
+		}
+		char rfidString[512];
+		if (_playMode == TIME_RELEASE) {
+			if (months) snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
+			else snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+		} else {
+			snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter);
+		}
 		gPrefsRfid.putString(_rfidIdAssinId, rfidString);
 		Rfid_ResetLastTag(); // The tag means something else now: make sure re-applying it is not deduped away
 
@@ -1503,6 +1547,32 @@ void handleGetInfo(AsyncWebServerRequest *request) {
 		memoryObj["largestFreeBlock"] = (uint32_t) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 		memoryObj["freePSRam"] = ESP.getFreePsram();
 		memoryObj["largestFreePSRamBlock"] = String(ESP.getMaxAllocPsram());
+	}
+	// SD card
+	if ((section == "") || (section == "sdcard")) {
+		JsonObject sdCardObj = infoObj["sdcard"].to<JsonObject>();
+		const bool available = SdCard_IsMounted();
+		const uint64_t totalBytes = available ? SdCard_GetTotalSize() : 0;
+		const uint64_t usedBytesRaw = available ? SdCard_GetUsedSize() : 0;
+		const bool statsAvailable = totalBytes > 0 && usedBytesRaw <= totalBytes;
+		const uint64_t usedBytes = statsAvailable ? usedBytesRaw : 0;
+		const uint64_t freeBytes = statsAvailable ? totalBytes - usedBytes : 0;
+
+		// Send byte counts as decimal strings. This keeps all 64 bits intact,
+		// independent of JSON-number configuration; the browser converts them
+		// with Number(...) before formatting.
+		char totalBytesText[24];
+		char usedBytesText[24];
+		char freeBytesText[24];
+		snprintf(totalBytesText, sizeof(totalBytesText), "%llu", static_cast<unsigned long long>(totalBytes));
+		snprintf(usedBytesText, sizeof(usedBytesText), "%llu", static_cast<unsigned long long>(usedBytes));
+		snprintf(freeBytesText, sizeof(freeBytesText), "%llu", static_cast<unsigned long long>(freeBytes));
+
+		sdCardObj["available"] = available;
+		sdCardObj["statsAvailable"] = statsAvailable;
+		sdCardObj["totalBytes"] = totalBytesText;
+		sdCardObj["usedBytes"] = usedBytesText;
+		sdCardObj["freeBytes"] = freeBytesText;
 	}
 	// wifi
 	if ((section == "") || (section == "wifi")) {
@@ -2507,6 +2577,8 @@ static bool tagIdToJSON(const String tagId, JsonObject entry) {
 	uint32_t _lastPlayPos = 0;
 	uint16_t _trackLastPlayed = 0;
 	uint32_t _mode = 1;
+	uint32_t _timeReleaseStart = 0;
+	uint32_t _timeReleaseInterval = 0;
 
 	char s_buf[512];
 	strncpy(s_buf, s.c_str(), sizeof(s_buf) - 1);
@@ -2523,6 +2595,10 @@ static bool tagIdToJSON(const String tagId, JsonObject entry) {
 			_mode = strtoul(token, NULL, 10);
 		} else if (i == 4) {
 			_trackLastPlayed = strtoul(token, NULL, 10);
+		} else if (i == 5) {
+			_timeReleaseStart = strtoul(token, NULL, 10);
+		} else if (i == 6) {
+			_timeReleaseInterval = strtoul(token, NULL, 10);
 		}
 		i++;
 		token = strtok(NULL, stringDelimiter);
@@ -2535,6 +2611,10 @@ static bool tagIdToJSON(const String tagId, JsonObject entry) {
 		entry["playMode"] = _mode;
 		entry["lastPlayPos"] = _lastPlayPos;
 		entry["trackLastPlayed"] = _trackLastPlayed;
+		if (_mode == TIME_RELEASE) {
+			entry["timeReleaseStart"] = _timeReleaseStart;
+			entry["timeReleaseInterval"] = _timeReleaseInterval;
+		}
 	}
 	return true;
 }
@@ -2651,8 +2731,22 @@ static void handlePostRFIDRequest(AsyncWebServerRequest *request, JsonVariant &j
 		request->send(500, "text/plain; charset=utf-8", "/rfid (POST): Invalid playMode or modId");
 		return;
 	}
-	char rfidString[275];
-	snprintf(rfidString, sizeof(rfidString) / sizeof(rfidString[0]), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter);
+	const uint32_t start = jsonObj["timeReleaseStart"] | 0;
+	const uint32_t interval = jsonObj["timeReleaseInterval"] | 0;
+	const uint32_t intervalValue = jsonObj["timeReleaseIntervalValue"] | 0;
+	const char *intervalUnit = jsonObj["timeReleaseIntervalUnit"] | "";
+	const bool months = strcmp(intervalUnit, "months") == 0;
+	if (_playModeOrModId == TIME_RELEASE && (start == 0 || (months ? intervalValue == 0 : interval == 0))) {
+		request->send(400, "text/plain; charset=utf-8", "TIME_RELEASE requires a start time and positive interval");
+		return;
+	}
+	char rfidString[512];
+	if (_playModeOrModId == TIME_RELEASE) {
+		if (months) snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
+		else snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+	} else {
+		snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter);
+	}
 	gPrefsRfid.putString(tagId.c_str(), rfidString);
 	Rfid_ResetLastTag(); // The tag means something else now: make sure re-applying it is not deduped away
 
@@ -2685,7 +2779,18 @@ static void handleDeleteRFIDRequest(AsyncWebServerRequest *request) {
 			// stop playback, tag to delete is in use
 			Cmd_Action(CMD_STOP);
 		}
-		if (gPrefsRfid.remove(tagId.c_str())) {
+		// MediaHub cascade (concept §13.1): the NVS entry's path field starts
+		// with "mediahub://" for MediaHub-managed cards. Checked - and cleaned
+		// up - before the NVS entry itself is removed below: if the cleanup
+		// fails, the NVS entry is deliberately left in place so a retry can
+		// still recognize the card as MediaHub-managed and try again. Removing
+		// the NVS entry unconditionally would lose that marker on a partial
+		// failure, orphaning the local media/manifest files forever.
+		const String nvsValue = gPrefsRfid.getString(tagId.c_str(), "");
+		const bool isMediaHubCard = nvsValue.startsWith(String(stringDelimiter) + MediaHub_PathPrefix);
+		const bool mediaHubCleanupOk = !isMediaHubCard || MediaHub_DeleteCard(tagId.c_str());
+
+		if (mediaHubCleanupOk && gPrefsRfid.remove(tagId.c_str())) {
 			Rfid_ResetLastTag(); // The tag means nothing now: make sure re-applying it is not deduped away
 			Log_Printf(LOGLEVEL_INFO, "/rfid (DELETE): tag %s removed successfuly", tagId);
 			request->send(200, "text/plain; charset=utf-8", tagId + " removed successfuly");
@@ -2696,6 +2801,116 @@ static void handleDeleteRFIDRequest(AsyncWebServerRequest *request) {
 	} else {
 		Log_Printf(LOGLEVEL_DEBUG, "/rfid (DELETE): tag %s not exists", tagId);
 		request->send(404, "text/plain; charset=utf-8", "error removing tag from NVS: Tag not exists");
+	}
+}
+
+// Registered MediaHub servers (concept §5.1): pure Web-UI enrollment
+// convenience, never read by the runtime playback flow.
+static void handleGetMediaHubServers(AsyncWebServerRequest *request) {
+	AsyncJsonResponse *response = new AsyncJsonResponse(true);
+	JsonArray arr = response->getRoot();
+	uint8_t rank = 1;
+	for (const MediaHubServer &server : MediaHub_GetServers()) {
+		JsonObject obj = arr.add<JsonObject>();
+		obj["name"] = server.name;
+		obj["hostPort"] = server.hostPort;
+		obj["https"] = server.https;
+		obj["alias"] = server.alias;
+		obj["hubKey"] = MediaHub_GetHubKey(String(server.https ? "https://" : "http://") + server.hostPort);
+		obj["rank"] = rank++;
+	}
+	response->setLength();
+	request->send(response);
+}
+
+static void handlePostMediaHubServers(AsyncWebServerRequest *request, JsonVariant &json) {
+	const char *name = json["name"].as<const char *>();
+	const char *hostPort = json["hostPort"].as<const char *>();
+	const bool https = json["https"] | false;
+	const char *alias = json["alias"] | "";
+	if (!name || !hostPort || strlen(name) == 0 || strlen(hostPort) == 0) {
+		request->send(400, "text/plain; charset=utf-8", "error adding media server");
+		return;
+	}
+	if (MediaHub_SaveServer(name, hostPort, https, alias)) {
+		request->send(200, "text/plain; charset=utf-8", name);
+	} else {
+		request->send(400, "text/plain; charset=utf-8", "invalid or duplicate MediaHub alias");
+	}
+}
+
+static void handleDeleteMediaHubServers(AsyncWebServerRequest *request) {
+	const AsyncWebParameter *p = request->getParam("name");
+	const String name = p->value();
+	if (MediaHub_DeleteServer(name)) {
+		request->send(200, "text/plain; charset=utf-8", name);
+	} else {
+		request->send(500, "text/plain; charset=utf-8", "error deleting media server");
+	}
+}
+
+static void handlePostMediaHubServersOrder(AsyncWebServerRequest *request, JsonVariant &json) {
+	const char *name = json["name"].as<const char *>();
+	const int direction = json["direction"] | 0;
+	if (!name || strlen(name) == 0 || (direction != -1 && direction != 1)
+		|| !MediaHub_MoveServer(name, static_cast<int8_t>(direction))) {
+		request->send(400, "text/plain; charset=utf-8", "error updating media server priority");
+		return;
+	}
+	request->send(200);
+}
+
+static void Web_SendMediaHubToggle(AsyncWebServerRequest *request, bool enabled) {
+	AsyncJsonResponse *response = new AsyncJsonResponse(false);
+	response->getRoot()["enabled"] = enabled;
+	response->setLength();
+	request->send(response);
+}
+
+static bool Web_ReadMediaHubToggle(JsonVariant &json, bool (*save)(bool, size_t *), bool (*load)(),
+	AsyncWebServerRequest *request) {
+	if (!json["enabled"].is<bool>()) {
+		request->send(400, "text/plain; charset=utf-8", "enabled must be a boolean");
+		return false;
+	}
+	size_t written = 0;
+	if (!save(json["enabled"].as<bool>(), &written)) {
+		request->send(500, "text/plain; charset=utf-8", "error saving MediaHub setting");
+		return false;
+	}
+	Web_SendMediaHubToggle(request, load());
+	return true;
+}
+
+static void handleGetMediaHubAutoSync(AsyncWebServerRequest *request) {
+	Web_SendMediaHubToggle(request, MediaHub_IsAutoSyncEnabled());
+}
+
+static void handlePostMediaHubAutoSync(AsyncWebServerRequest *request, JsonVariant &json) {
+	Web_ReadMediaHubToggle(json, MediaHub_SetAutoSyncEnabled, MediaHub_IsAutoSyncEnabled, request);
+}
+
+static void handleGetMediaHubVisibleStorage(AsyncWebServerRequest *request) {
+	Web_SendMediaHubToggle(request, MediaHub_IsVisibleStorageEnabled());
+}
+
+static void handlePostMediaHubVisibleStorage(AsyncWebServerRequest *request, JsonVariant &json) {
+	Web_ReadMediaHubToggle(json, MediaHub_SetVisibleStorageEnabled, MediaHub_IsVisibleStorageEnabled, request);
+}
+
+static void handlePostMediaHubCleanupAll(AsyncWebServerRequest *request) {
+	if (MediaHub_CleanupAllHidden()) {
+		request->send(200, "text/plain; charset=utf-8", "hidden MediaHub cache removed");
+	} else {
+		request->send(409, "text/plain; charset=utf-8", "MediaHub cleanup refused or failed");
+	}
+}
+
+static void handlePostMediaHubCleanupOrphans(AsyncWebServerRequest *request) {
+	if (MediaHub_CleanupOrphanedHidden()) {
+		request->send(200, "text/plain; charset=utf-8", "orphaned hidden MediaHub cache removed");
+	} else {
+		request->send(409, "text/plain; charset=utf-8", "MediaHub cleanup refused or failed");
 	}
 }
 

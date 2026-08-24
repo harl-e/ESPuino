@@ -10,6 +10,7 @@
 #include "EnumUtils.h"
 #include "Led.h"
 #include "Log.h"
+#include "MediaHub.h"
 #include "MemX.h"
 #include "Mqtt.h"
 #include "Port.h"
@@ -159,6 +160,7 @@ uint8_t trackCommand = NO_ACTION;
 bool audioReturnCode;
 uint32_t AudioPlayer_LastPlaytimeStatsTimestamp = 0u;
 static uint32_t AudioPlayer_resumeSeekPendingSecs = 0; // deferred resume-seek target (seconds); 0 = none pending (declared early: used by the audio_info evt_bitrate callback above AudioPlayer_Loop)
+static uint32_t AudioPlayer_AudiobookTrackEofTimestamp = 0;
 Playlist *newPlayList = nullptr;
 bool newPlayListAvailable = false;
 
@@ -231,6 +233,10 @@ void Audio_InfoCallback(Audio::msg_t m) {
 		}
 		case Audio::evt_eof: { // end of file
 			Log_Printf(LOGLEVEL_INFO, "end of file:  %s", m.msg);
+			if (gPlayProperties.playMode == AUDIOBOOK) {
+				AudioPlayer_AudiobookTrackEofTimestamp = millis();
+				Log_Printf(LOGLEVEL_DEBUG, "Audiobook EOF: track %u finished at %u ms", gPlayProperties.currentTrackNumber + 1, AudioPlayer_AudiobookTrackEofTimestamp);
+			}
 			gPlayProperties.trackFinished = true;
 			gPlayProperties.currentSpeechActive = false;
 			break;
@@ -377,6 +383,16 @@ float Audio_GetVolume(float t) {
 	return val1 + (val2 - val1) * fraction;
 }
 
+// Applies the tone/equalizer gains and keeps the audio library's per-sample IIR tone filter enabled
+// only while the equalizer is actually non-flat. With a flat EQ (all gains 0, the default) the filter
+// would just pass the signal through unchanged, so running it per output sample is wasted CPU on core 1
+// -- the same core loop() polls buttons/rotary on, which is why heavy decoders (AAC/m4a) starve input.
+// See https://forum.espuino.de/t/keine-bedienung-bei-bestimmten-dateien-moeglich/4675
+static void AudioPlayer_ApplyTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass) {
+	audio->settings.IIR_FILTER = (gainLowPass != 0 || gainBandPass != 0 || gainHighPass != 0);
+	audio->setTone(gainLowPass, gainBandPass, gainHighPass);
+}
+
 void AudioPlayer_Init(void) {
 	// create audio object
 	audio = new AudioCustom();
@@ -496,10 +512,14 @@ void AudioPlayer_Init(void) {
 	audio->setVolumeCurve(Audio_GetVolume);
 	audio->setVolume(AudioPlayer_CurrentVolume);
 	audio->forceMono(gPlayProperties.currentPlayMono);
-	audio->setTone(
+	AudioPlayer_ApplyTone(
 		gPrefsSettings.getChar("gainLowPass", 0),
 		gPrefsSettings.getChar("gainBandPass", 0),
 		gPrefsSettings.getChar("gainHighPass", 0));
+
+	// ESPuino never reads the audio library's VU level, so skip its per-sample computation entirely
+	// (frees CPU on the shared core -- see AudioPlayer_ApplyTone() and forum thread #4675).
+	audio->settings.VU_LEVEL = false;
 
 	audio->setAudioTaskCore(1);
 	audio->audio_info_callback = Audio_InfoCallback;
@@ -605,6 +625,22 @@ uint8_t AudioPlayer_GetMaxVolumeSpeaker(void) {
 
 void AudioPlayer_SetMaxVolumeSpeaker(uint8_t value) {
 	AudioPlayer_MaxVolumeSpeaker = value;
+}
+
+void AudioPlayer_ApplyMaxVolumes(uint8_t speaker, uint8_t headphone) {
+	AudioPlayer_MaxVolumeSpeaker = speaker;
+
+#ifdef HEADPHONE_ADJUST_ENABLE
+	AudioPlayer_MaxVolumeHeadphone = headphone;
+	AudioPlayer_MaxVolume = AudioPlayer_IsHeadphoneModeActive() ? AudioPlayer_MaxVolumeHeadphone : AudioPlayer_MaxVolumeSpeaker;
+#else
+	(void) headphone;
+	AudioPlayer_MaxVolume = AudioPlayer_MaxVolumeSpeaker;
+#endif
+
+	if (AudioPlayer_CurrentVolume > AudioPlayer_MaxVolume) {
+		AudioPlayer_SetVolume(AudioPlayer_MaxVolume);
+	}
 }
 
 uint8_t AudioPlayer_GetMinVolume(void) {
@@ -759,8 +795,10 @@ void AudioPlayer_Loop() {
 	}
 
 	if (newPlayListAvailable || gPlayProperties.trackFinished || trackCommand != NO_ACTION) {
+		bool deferAudiobookPositionSave = false;
 		if (newPlayListAvailable) {
 			newPlayListAvailable = false;
+			AudioPlayer_AudiobookTrackEofTimestamp = 0;
 			audio->stopSong();
 
 			// destroy the old playlist and assign the new one
@@ -791,7 +829,11 @@ void AudioPlayer_Loop() {
 				gPlayProperties.playlistFinished = true;
 				return;
 			}
-			if (gPlayProperties.saveLastPlayPosition) { // Don't save for AUDIOBOOK_LOOP because not necessary
+			// For a normal AUDIOBOOK transition, start the next file before the synchronous NVS
+			// write. Other playmodes (including AUDIOBOOK_LOOP) keep their exact existing order.
+			deferAudiobookPositionSave = gPlayProperties.playMode == AUDIOBOOK && !gPlayProperties.repeatCurrentTrack
+				&& gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size();
+			if (gPlayProperties.saveLastPlayPosition && !deferAudiobookPositionSave) { // Don't save for AUDIOBOOK_LOOP because not necessary
 				if (gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size()) {
 					// Only save if there's another track, otherwise it will be saved at end of playlist anyway
 					AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber + 1);
@@ -859,7 +901,7 @@ void AudioPlayer_Loop() {
 				Web_SendWebsocketData(0, WebsocketCodeType::TrackInfo);
 				return;
 
-			case NEXTTRACK:
+			case NEXTTRACK: {
 				trackCommand = NO_ACTION;
 				if (gPlayProperties.pausePlay) {
 					audio->pauseResume();
@@ -876,7 +918,8 @@ void AudioPlayer_Loop() {
 				}
 				// Allow next track if current track played in playlist isn't the last track.
 				// Exception: loop-playlist is active. In this case playback restarts at the first track of the playlist.
-				if ((gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size()) || gPlayProperties.repeatPlaylist) {
+				const size_t lastAllowedTrack = gPlayProperties.timeReleaseActive ? gPlayProperties.timeReleaseMaxTrack : gPlayProperties.playlist->size() - 1;
+				if ((gPlayProperties.currentTrackNumber + 1 <= lastAllowedTrack) || (!gPlayProperties.timeReleaseActive && gPlayProperties.repeatPlaylist)) {
 					if ((gPlayProperties.currentTrackNumber + 1 >= gPlayProperties.playlist->size()) && gPlayProperties.repeatPlaylist) {
 						gPlayProperties.currentTrackNumber = 0;
 					} else {
@@ -896,6 +939,7 @@ void AudioPlayer_Loop() {
 					return;
 				}
 				break;
+			}
 
 			case PREVIOUSTRACK:
 				trackCommand = NO_ACTION;
@@ -982,7 +1026,7 @@ void AudioPlayer_Loop() {
 				}
 				break;
 
-			case LASTTRACK:
+			case LASTTRACK: {
 				trackCommand = NO_ACTION;
 				if (gPlayProperties.pausePlay) {
 					audio->pauseResume();
@@ -991,8 +1035,9 @@ void AudioPlayer_Loop() {
 					publishMqtt(topicPausePlay, "play", false);
 #endif
 				}
-				if (gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size()) {
-					gPlayProperties.currentTrackNumber = gPlayProperties.playlist->size() - 1;
+				const size_t lastAllowedTrack = gPlayProperties.timeReleaseActive ? gPlayProperties.timeReleaseMaxTrack : gPlayProperties.playlist->size() - 1;
+				if (gPlayProperties.currentTrackNumber < lastAllowedTrack) {
+					gPlayProperties.currentTrackNumber = lastAllowedTrack;
 					if (gPlayProperties.saveLastPlayPosition) {
 						AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber);
 						Log_Println(trackStartAudiobook, LOGLEVEL_INFO);
@@ -1007,6 +1052,7 @@ void AudioPlayer_Loop() {
 					return;
 				}
 				break;
+			}
 
 			case NEXTFOLDER: // Used for recursive playmodes
 				trackCommand = NO_ACTION;
@@ -1068,6 +1114,16 @@ void AudioPlayer_Loop() {
 			return;
 		}
 
+		if (gPlayProperties.timeReleaseActive && gPlayProperties.currentTrackNumber > gPlayProperties.timeReleaseMaxTrack) {
+			// EOF, NEXT and all regular control paths converge here.  Never let
+			// the audio backend connect a track that has not been released yet.
+			gPlayProperties.currentTrackNumber = 0;
+			gPlayProperties.playlistFinished = true;
+			gPlayProperties.playMode = NO_PLAYLIST;
+			Audio_setTitle(noPlaylist);
+			AudioPlayer_ClearCover();
+			return;
+		}
 		if (gPlayProperties.currentTrackNumber >= gPlayProperties.playlist->size()) { // Check if last element of playlist is already reached
 			Log_Println(endOfPlaylistReached, LOGLEVEL_NOTICE);
 			if (!gPlayProperties.repeatPlaylist) {
@@ -1149,6 +1205,14 @@ void AudioPlayer_Loop() {
 			gPlayProperties.trackFinished = true;
 			return;
 		} else {
+			if (deferAudiobookPositionSave) {
+				AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber);
+				if (AudioPlayer_AudiobookTrackEofTimestamp != 0) {
+					const uint32_t transitionDuration = millis() - AudioPlayer_AudiobookTrackEofTimestamp;
+					Log_Printf(LOGLEVEL_DEBUG, "Audiobook fast transition: track %u started %u ms after EOF", gPlayProperties.currentTrackNumber + 1, transitionDuration);
+				}
+				AudioPlayer_AudiobookTrackEofTimestamp = 0;
+			}
 			// Restart the periodic-checkpoint clock for the freshly-started track, so the first
 			// checkpoint lands one full interval into playback (not immediately) rather than
 			// firing at once; the 0 baseline just means the first checkpoint always writes.
@@ -1269,7 +1333,7 @@ void AudioPlayer_Loop() {
 		} else {
 			Log_Println(newPlayModeStereo, LOGLEVEL_NOTICE);
 		}
-		audio->setTone(gPlayProperties.gainLowPass, gPlayProperties.gainBandPass, gPlayProperties.gainHighPass);
+		AudioPlayer_ApplyTone(gPlayProperties.gainLowPass, gPlayProperties.gainBandPass, gPlayProperties.gainHighPass);
 	}
 
 	audio->loop(); // Call audio-loop function to process incoming data
@@ -1360,7 +1424,7 @@ void AudioPlayer_SetVolume(const int32_t _newVolume) {
 
 // Adds equalizer settings low, band and high pass and readjusts the equalizer
 void AudioPlayer_SetEqualizer(const int8_t gainLowPass, const int8_t gainBandPass, const int8_t gainHighPass) {
-	audio->setTone(gainLowPass, gainBandPass, gainHighPass);
+	AudioPlayer_ApplyTone(gainLowPass, gainBandPass, gainHighPass);
 }
 
 // Pauses playback if playback is active and volume is changes from minVolume+1 to minVolume (usually 0)
@@ -1385,7 +1449,24 @@ void AudioPlayer_PauseOnMinVolume(const uint8_t oldVolume, const uint8_t newVolu
 
 // Receives de-serialized RFID-data (from NVS) and dispatches playlists for the given
 // playmode to the track-queue.
-void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPos, const uint32_t _playMode, const uint16_t _trackLastPlayed) {
+bool AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPos, const uint32_t _playMode, const uint16_t _trackLastPlayed,
+	const TimeReleaseConfig *timeRelease) {
+	if (_playMode == TIME_RELEASE && (timeRelease == nullptr || !TimeRelease_IsConfigValid(*timeRelease))) {
+		Log_Println("TIME_RELEASE: invalid configuration", LOGLEVEL_ERROR);
+		System_IndicateError();
+		return false;
+	}
+	if (_playMode == TIME_RELEASE && !TimeRelease_IsCurrentTimeValid()) {
+		Log_Println("TIME_RELEASE: current time is not valid", LOGLEVEL_ERROR);
+		System_IndicateError();
+		return false;
+	}
+	if (_playMode == TIME_RELEASE && time(nullptr) < static_cast<time_t>(timeRelease->startTime)) {
+		// Do this before the normal audiobook hand-over logic so an unreleased
+		// card never pauses or otherwise changes an unrelated active playlist.
+		Log_Println("TIME_RELEASE: content not released yet", LOGLEVEL_NOTICE);
+		return false;
+	}
 	// Make sure last playposition for audiobook is saved when new RFID-tag is applied
 	if (gPlayProperties.SavePlayPosRfidChange && !gPlayProperties.pausePlay && (gPlayProperties.playMode == AUDIOBOOK || gPlayProperties.playMode == AUDIOBOOK_LOOP || gPlayProperties.playMode == AUDIOBOOK_RECURSIVE)) {
 		AudioPlayer_SetTrackControl(PAUSEPLAY);
@@ -1428,12 +1509,17 @@ void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 		if (gPlayProperties.playMode != NO_PLAYLIST) {
 			AudioPlayer_SetTrackControl(STOP);
 		}
-		return;
+		return false;
 	}
 
 	gPlayProperties.playMode = BUSY; // Show @Neopixel, if uC is busy with creating playlist
 	Playlist *list = musicFiles.value();
 	if (!list->size()) {
+		if (_playMode == TIME_RELEASE) {
+			Log_Println("TIME_RELEASE: no audio files in directory", LOGLEVEL_NOTICE);
+			freePlaylist(list);
+			return false;
+		}
 		Log_Println(noMp3FilesInDir, LOGLEVEL_NOTICE);
 		System_IndicateError();
 		if (!gPlayProperties.pausePlay) {
@@ -1446,7 +1532,7 @@ void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 
 		gPlayProperties.playMode = NO_PLAYLIST;
 		freePlaylist(list);
-		return;
+		return false;
 	}
 
 	// Set some default-values
@@ -1456,6 +1542,8 @@ void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 	gPlayProperties.sleepAfterPlaylist = false;
 	gPlayProperties.saveLastPlayPosition = false;
 	gPlayProperties.playUntilTrackNumber = 0;
+	gPlayProperties.timeReleaseActive = false;
+	gPlayProperties.timeReleaseMaxTrack = 0;
 
 	// Store last RFID-tag to NVS
 	gPrefsSettings.putString("lastRfid", gCurrentRfidTagId);
@@ -1525,6 +1613,24 @@ void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 			break;
 		}
 
+		case TIME_RELEASE: {
+			AudioPlayer_SortPlaylist(list);
+			const int32_t maxTrack = TimeRelease_GetMaxTrack(*timeRelease, list->size());
+			if (maxTrack < 0) {
+				Log_Println("TIME_RELEASE: content not released yet", LOGLEVEL_NOTICE);
+				freePlaylist(list);
+				return false;
+			}
+			// A new session begins on the newest release. Earlier tracks remain
+			// navigable; the common EOF/navigation guard blocks future files.
+			gPlayProperties.currentTrackNumber = static_cast<uint16_t>(maxTrack);
+			gPlayProperties.startAtFilePos = 0;
+			gPlayProperties.timeReleaseMaxTrack = static_cast<uint16_t>(maxTrack);
+			gPlayProperties.timeReleaseActive = true;
+			Log_Println("TIME_RELEASE: starting newest released track", LOGLEVEL_NOTICE);
+			break;
+		}
+
 		case ALL_TRACKS_OF_DIR_RANDOM_RECURSIVE: {
 			Log_Printf(LOGLEVEL_NOTICE, modeAllTrackRandomRecursive, folderPath.c_str());
 			AudioPlayer_RandomizePlaylist(list);
@@ -1577,13 +1683,14 @@ void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 		gPlayProperties.playMode = _playMode;
 		newPlayListAvailable = true;
 		newPlayList = list;
-		return;
+		return true;
 	}
 
 	// we had an error, blink and destroy playlist
 	gPlayProperties.playMode = NO_PLAYLIST;
 	System_IndicateError();
 	freePlaylist(list);
+	return false;
 }
 
 /* Wraps putString for writing settings into NVS for RFID-cards.
@@ -1595,10 +1702,24 @@ size_t AudioPlayer_NvsRfidWriteWrapper(const char *_rfidCardId, const uint32_t _
 		return 0;
 	}
 	Led_SetPause(true); // Workaround to prevent exceptions due to Neopixel-signalisation while NVS-write
-	char firstPart[275] = {0};
-	char prefBuf[275];
+	char firstPart[512] = {0};
+	char prefBuf[512];
 
 	gPrefsRfid.getString(_rfidCardId, firstPart, sizeof(firstPart)); // read back previous value from NVS
+	const String existing(firstPart);
+	String timeReleaseSuffix;
+	if (_playMode == TIME_RELEASE) {
+		int delimiter = -1;
+		for (uint8_t count = 0; count < 4; ++count) {
+			delimiter = existing.indexOf(stringDelimiter, delimiter + 1);
+			if (delimiter < 0) {
+				break;
+			}
+		}
+		if (delimiter >= 0) {
+			timeReleaseSuffix = existing.substring(delimiter);
+		}
+	}
 
 	// Remove everything after the first part (after the first stringDelimiter)
 	char *pos = strchr(firstPart + strlen(stringDelimiter), stringDelimiter[0]);
@@ -1606,10 +1727,19 @@ size_t AudioPlayer_NvsRfidWriteWrapper(const char *_rfidCardId, const uint32_t _
 		*pos = '\0'; // Terminate the string at this position
 	}
 
-	// Build the new string with the preserved first part (which already contains the track)
-	snprintf(prefBuf, sizeof(prefBuf), "%s%s%" PRIu32 "%s%d%s%" PRIu16, firstPart, stringDelimiter, _playPosition, stringDelimiter, _playMode, stringDelimiter, _trackLastPlayed);
+	// MediaHub-managed cards (concept §8.1) store MEDIAHUB as a marker in this
+	// field, not the real playmode; gPlayProperties.playMode is the manifest's
+	// real mode by the time playback reaches this wrapper, so writing it back
+	// verbatim would silently overwrite the marker on the first position-save.
+	uint8_t playModeToStore = _playMode;
+	if (MediaHub_IsMediaHubPath(firstPart + strlen(stringDelimiter))) {
+		playModeToStore = MEDIAHUB;
+	}
 
-	Log_Printf(LOGLEVEL_INFO, wroteLastTrackToNvs, prefBuf, _rfidCardId, _playMode, _trackLastPlayed);
+	// Build the new string with the preserved first part (which already contains the track)
+	snprintf(prefBuf, sizeof(prefBuf), "%s%s%" PRIu32 "%s%d%s%" PRIu16 "%s", firstPart, stringDelimiter, _playPosition, stringDelimiter, playModeToStore, stringDelimiter, _trackLastPlayed, timeReleaseSuffix.c_str());
+
+	Log_Printf(LOGLEVEL_INFO, wroteLastTrackToNvs, prefBuf, _rfidCardId, playModeToStore, _trackLastPlayed);
 	Log_Println(prefBuf, LOGLEVEL_INFO);
 	Led_SetPause(false);
 	return gPrefsRfid.putString(_rfidCardId, prefBuf);

@@ -9,6 +9,7 @@
 #include "Ftp.h"
 #include "Led.h"
 #include "Log.h"
+#include "MediaHub.h"
 #include "Mqtt.h"
 #include "Queues.h"
 #include "System.h"
@@ -191,6 +192,14 @@ void Cmd_Action(const uint16_t mod) {
 
 		case CMD_TOGGLE_AMBIENT_LIGHT: {
 			Led_ToggleAmbientLight();
+			break;
+		}
+
+		case CMD_MEDIAHUB_SYNC: {
+			// This is deliberately a normal command/modifier: it refreshes the
+			// locally provisioned MediaHub library, but never selects or starts a
+			// playlist. Playback remains owned by the next ordinary RFID tap.
+			MediaHub_SyncLocalManifests();
 			break;
 		}
 

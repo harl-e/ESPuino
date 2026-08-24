@@ -36,6 +36,8 @@
 #define WEBSTREAM												  8 // Play webradio-stream
 #define LOCAL_M3U												  11 // Plays items (webstream or files) with addresses/paths from a local m3u-file
 #define BUSY													  10 // Used if playlist is created
+#define MEDIAHUB												  18 // Card is managed by an external MediaHub (see mediahub-konzept.md); real playMode comes from its manifest, not from here
+#define TIME_RELEASE											  19 // Sorted folder with locally time-released tracks
 
 // RFID-modifcation-types
 #define CMD_NOTHING						 0 // Do Nothing
@@ -60,6 +62,7 @@
 #define CMD_TOGGLE_AMBIENT_LIGHT		 153 // Command: toggles the ambient light
 #define CMD_BRIGHTNESS_UP				 154 // Command: raise LED-brightness by one step
 #define CMD_BRIGHTNESS_DOWN				 155 // Command: lower LED-brightness by one step
+#define CMD_MEDIAHUB_SYNC				 156 // Synchronizes all locally provisioned MediaHub manifests without playback
 
 #define CMD_PLAYPAUSE	   170 // Command: play/pause
 #define CMD_PREVTRACK	   171 // Command: previous track

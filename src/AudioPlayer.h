@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Playlist.h"
+#include "TimeRelease.h"
 
 #include <optional>
 
@@ -56,6 +57,8 @@ typedef struct { // Bit field
 	size_t coverFileSize; // current cover file size
 	size_t audioFileDuration; // file duration of current audio file (in seconds)
 	uint16_t savePosIntervalSecs = 0; // periodic play-position checkpoint interval in seconds (0 = disabled)
+	uint16_t timeReleaseMaxTrack = 0;
+	bool timeReleaseActive : 1;
 } playProps;
 
 extern playProps gPlayProperties;
@@ -70,7 +73,8 @@ void AudioPlayer_Loop(void);
 uint8_t AudioPlayer_GetRepeatMode(void);
 void AudioPlayer_SetVolume(const int32_t _newVolume);
 void AudioPlayer_SetEqualizer(const int8_t gainLowPass, const int8_t gainBandPass, const int8_t gainHighPass);
-void AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPos, const uint32_t _playMode, const uint16_t _trackLastPlayed);
+bool AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPos, const uint32_t _playMode, const uint16_t _trackLastPlayed,
+	const TimeReleaseConfig *timeRelease = nullptr);
 void AudioPlayer_SetTrackControl(const uint8_t trackCommand);
 // Queue a relative seek. Accumulates, so one call per rotary detent scrubs proportionally.
 void AudioPlayer_AddSeekOffset(const int16_t seconds);
@@ -97,6 +101,7 @@ uint8_t AudioPlayer_GetMaxVolume(void);
 void AudioPlayer_SetMaxVolume(uint8_t value);
 uint8_t AudioPlayer_GetMaxVolumeSpeaker(void);
 void AudioPlayer_SetMaxVolumeSpeaker(uint8_t value);
+void AudioPlayer_ApplyMaxVolumes(uint8_t speaker, uint8_t headphone);
 uint8_t AudioPlayer_GetMinVolume(void);
 void AudioPlayer_SetMinVolume(uint8_t value);
 uint8_t AudioPlayer_GetInitVolume(void);

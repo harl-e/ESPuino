@@ -402,9 +402,15 @@ void RfidPn5180_Task(void *parameter) {
 			// Only pause if there's actually something to pause -- otherwise removing a card after the
 			// playlist has already finished naturally queues a PAUSEPLAY that AudioPlayer_Cyclic() then
 			// rejects with "no playmode change while idle", which is a confusing error for a normal action.
-			if (!cardAppliedCurrentRun && cardAppliedLastRun && !gPlayProperties.pausePlay && !gPlayProperties.playlistFinished && gPlayProperties.playMode != NO_PLAYLIST && System_GetOperationMode() != OPMODE_BLUETOOTH_SINK) { // Card removed => pause
-				AudioPlayer_SetTrackControl(PAUSEPLAY);
-				Log_Println(rfidTagRemoved, LOGLEVEL_NOTICE);
+			if (!cardAppliedCurrentRun && cardAppliedLastRun) {
+				Rfid_SetCardPresent(false);
+				// Only pause if there's actually something to pause -- otherwise removing a card after the
+				// playlist has already finished naturally queues a PAUSEPLAY that AudioPlayer_Cyclic() then
+				// rejects with "no playmode change while idle", which is a confusing error for a normal action.
+				if (!gPlayProperties.pausePlay && !gPlayProperties.playlistFinished && gPlayProperties.playMode != NO_PLAYLIST && System_GetOperationMode() != OPMODE_BLUETOOTH_SINK) { // Card removed => pause
+					AudioPlayer_SetTrackControl(PAUSEPLAY);
+					Log_Println(rfidTagRemoved, LOGLEVEL_NOTICE);
+				}
 			}
 			cardAppliedLastRun = cardAppliedCurrentRun;
 		}
@@ -437,6 +443,7 @@ void RfidPn5180_Task(void *parameter) {
 
 			if (memcmp((const void *) lastValidcardId, (const void *) cardId, sizeof(cardId)) == 0) {
 				sameCardReapplied = true;
+				Log_Println("RFID same physical tag detected", LOGLEVEL_DEBUG);
 			}
 
 			String hexString;
@@ -453,11 +460,18 @@ void RfidPn5180_Task(void *parameter) {
 				snprintf(num, sizeof(num), "%03d", cardId[i]);
 				cardIdString += num;
 			}
+			Rfid_SetCardPresent(true);
 
 			if (gPlayProperties.pauseIfRfidRemoved) {
 				if (!sameCardReapplied || gPlayProperties.trackFinished || gPlayProperties.playlistFinished) { // Don't allow to send card to queue if it's the same card again if track or playlist is unfnished
 					xQueueSend(gRfidCardQueue, cardIdString.c_str(), 0);
+				} else if (!Rfid_IsTagEligibleForResume(cardIdString.c_str())) {
+					// A physical UID match alone is not enough: unknown cards and cards that no longer
+					// own the active playlist must run through the normal lookup/AutoSync path again.
+					Log_Printf(LOGLEVEL_DEBUG, "RFID not eligible for resume -> normal processing: %s", cardIdString.c_str());
+					xQueueSend(gRfidCardQueue, cardIdString.c_str(), 0);
 				} else {
+					Log_Printf(LOGLEVEL_DEBUG, "RFID eligible for resume: %s", cardIdString.c_str());
 					// If pause-button was pressed while card was not applied, playback could be active. If so: don't pause when card is reapplied again as the desired functionality would be reversed in this case.
 					if (gPlayProperties.pausePlay && System_GetOperationMode() != OPMODE_BLUETOOTH_SINK) {
 						AudioPlayer_SetTrackControl(PAUSEPLAY); // ... play/pause instead
