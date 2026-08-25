@@ -33,9 +33,9 @@ jobs:
       matrix:
         variant:
           # - ttgo_t8 # Derzeit deaktiviert
-          - lolin_d32_pro
+          # - lolin_d32_pro
           - lolin_d32_pro_sdmmc_pe
-          - complete
+          # - complete
 
     steps:
       - name: Checkout ESPuino
@@ -82,21 +82,21 @@ jobs:
           cp ".pio/build/${{ matrix.variant }}/partitions.bin" \
              "binaries/partitions.bin"
 
-      - name: Build ${{ matrix.variant }} EN
-        run: |
-          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE EN/' src/settings.h
-          platformio run -e "${{ matrix.variant }}"
+#      - name: Build ${{ matrix.variant }} EN
+#        run: |
+#          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE EN/' src/settings.h
+#          platformio run -e "${{ matrix.variant }}"
+#
+#          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
+#             "binaries/firmware-EN.bin"
 
-          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
-             "binaries/firmware-EN.bin"
+#      - name: Build ${{ matrix.variant }} FR
+#        run: |
+#          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE FR/' src/settings.h
+#          platformio run -e "${{ matrix.variant }}"
 
-      - name: Build ${{ matrix.variant }} FR
-        run: |
-          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE FR/' src/settings.h
-          platformio run -e "${{ matrix.variant }}"
-
-          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
-             "binaries/firmware-FR.bin"
+#          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
+#             "binaries/firmware-FR.bin"
 
       - name: Upload firmware artifacts
         uses: https://code.forgejo.org/forgejo/upload-artifact@v4
