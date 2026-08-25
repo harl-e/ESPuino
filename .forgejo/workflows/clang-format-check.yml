@@ -1,5 +1,19 @@
 name: clang-format Check
-on: [push, pull_request]
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - ".clang-format"
+      - ".forgejo/workflows/clang-format.yml"
+
+  pull_request:
+    paths:
+      - "src/**"
+      - ".clang-format"
+      - ".forgejo/workflows/clang-format.yml"
+
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -8,11 +22,15 @@ jobs:
   formatting-check:
     name: Formatting Check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v5
-      - name: Run clang-format style check for C/C++/Protobuf programs.
-        uses: jidicula/clang-format-action@v4.18.0
+      - name: Checkout repository
+        uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Run clang-format style check
+        uses: https://github.com/jidicula/clang-format-action@v4.18.0
         with:
           clang-format-version: "16"
           check-path: "src"
-          fallback-style: "LLVM" # optional
+          fallback-style: "LLVM"

@@ -1,42 +1,53 @@
-name: build-all-firmwares
-run-name: Build firmwares for all boards (all languages)
+name: Build all firmwares
+
 on:
   workflow_dispatch:
+
   push:
     branches:
       - dev
       - master
+
   pull_request:
     paths:
-      - "src/*"
-      - "html/*"
-      - "test/*"
-      - "**.ini"
-      - "**.py"
-      - "**.csv"
+      - "src/**"
+      - "html/**"
+      - "test/**"
+      - "platformio.ini"
+      - "**/*.ini"
+      - "**/*.py"
+      - "**/*.csv"
+      - ".forgejo/workflows/firmware-builds.yml"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   test_builds:
-    timeout-minutes: 180
-    name: Run all Tests
+    name: Build ${{ matrix.variant }}
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+
     strategy:
       fail-fast: false
       matrix:
         variant:
-          # - ttgo_t8 # disabled for now.
+          # - ttgo_t8 # Derzeit deaktiviert
           - lolin_d32_pro
           - lolin_d32_pro_sdmmc_pe
           - complete
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout ESPuino
+        uses: https://code.forgejo.org/actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: https://code.forgejo.org/actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: https://code.forgejo.org/actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -44,78 +55,96 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: https://code.forgejo.org/actions/cache@v4
         with:
           path: ~/.platformio
-          key: ${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
-
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini', '**/*.ini', '**/lockfiles') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
 
       - name: Install PlatformIO Core
         run: |
-          pip install -U setuptools platformio
-          # Stick to the stable PlatformIO core: "pio upgrade --dev" pulled an unreleased core whose
-          # bundled SCons broke the link step (ModuleNotFoundError: SCons.Tool.FortranCommon).
+          python -m pip install --upgrade pip setuptools platformio
           pio pkg update --global
-          mkdir binaries
+          mkdir -p binaries
 
-      # --- Build 1: Language DE (Default) ---
-      - name: Build ${{ matrix.variant }} (DE)
+      - name: Build ${{ matrix.variant }} DE
         run: |
           sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE DE/' src/settings.h
-          platformio run -e ${{ matrix.variant }}
-          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-DE.bin
-          # bootloader and partition table are language-independent, so copy them once (here, at the DE build)
-          cp .pio/build/${{ matrix.variant }}/bootloader.bin binaries/bootloader.bin
-          cp .pio/build/${{ matrix.variant }}/partitions.bin binaries/partitions.bin
+          platformio run -e "${{ matrix.variant }}"
 
-      # --- Build 2: Language EN ---
-      - name: Build ${{ matrix.variant }} (EN)
+          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
+             "binaries/firmware-DE.bin"
+
+          cp ".pio/build/${{ matrix.variant }}/bootloader.bin" \
+             "binaries/bootloader.bin"
+
+          cp ".pio/build/${{ matrix.variant }}/partitions.bin" \
+             "binaries/partitions.bin"
+
+      - name: Build ${{ matrix.variant }} EN
         run: |
           sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE EN/' src/settings.h
-          platformio run -e ${{ matrix.variant }}
-          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-EN.bin
+          platformio run -e "${{ matrix.variant }}"
 
-      # --- Build 3: Language FR ---
-      - name: Build ${{ matrix.variant }} (FR)
+          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
+             "binaries/firmware-EN.bin"
+
+      - name: Build ${{ matrix.variant }} FR
         run: |
           sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE FR/' src/settings.h
-          platformio run -e ${{ matrix.variant }}
-          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-FR.bin
+          platformio run -e "${{ matrix.variant }}"
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+          cp ".pio/build/${{ matrix.variant }}/firmware.bin" \
+             "binaries/firmware-FR.bin"
+
+      - name: Upload firmware artifacts
+        uses: https://code.forgejo.org/forgejo/upload-artifact@v4
         with:
           name: ${{ matrix.variant }}
           path: binaries/
+          if-no-files-found: error
 
   commit:
-    if: ${{ github.repository == 'biologist79/ESPuino' && (github.ref_name == 'dev' || github.ref_name == 'master') && github.event_name != 'pull_request' }}
+    name: Publish firmwares
     runs-on: ubuntu-latest
-    needs: test_builds
+    needs:
+      - test_builds
+
+    if: >-
+      forgejo.event_name != 'pull_request' &&
+      (forgejo.ref_name == 'dev' || forgejo.ref_name == 'master')
+
     steps:
-      - name: Checkout target repository
-        uses: actions/checkout@v5
+      - name: Checkout firmware repository
+        uses: https://code.forgejo.org/actions/checkout@v4
         with:
-          repository: biologist79/ESPuino-Firmware
+          repository: ${{ forgejo.repository_owner }}/ESPuino-Firmware
           token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           path: target-repo
           persist-credentials: true
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: target-repo/Firmwares/${{ github.ref_name }}
-
-      - name: Commit and push changes
+      - name: Create target directory
         run: |
-          cd target-repo
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          mkdir -p Firmwares/${{ github.ref_name }}
-          git add Firmwares/${{ github.ref_name }}
-          git commit -m "Firmware built from commit biologist79/ESPuino@${{ github.sha }}" || echo "No changes to commit"
+          mkdir -p "target-repo/Firmwares/${{ forgejo.ref_name }}"
+
+      - name: Download firmware artifacts
+        uses: https://code.forgejo.org/forgejo/download-artifact@v4
+        with:
+          path: target-repo/Firmwares/${{ forgejo.ref_name }}
+
+      - name: Commit and push firmware changes
+        working-directory: target-repo
+        run: |
+          git config user.name "Forgejo Actions"
+          git config user.email "actions@forgejo.local"
+
+          git add "Firmwares/${{ forgejo.ref_name }}"
+
+          if git diff --cached --quiet; then
+            echo "Keine geänderten Firmware-Dateien."
+            exit 0
+          fi
+
+          git commit -m "Firmware build from ${{ forgejo.repository }}@${{ forgejo.sha }}"
           git push
