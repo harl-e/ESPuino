@@ -19,13 +19,13 @@
 #include <atomic>
 #include <cctype>
 #include <esp_heap_caps.h>
-#include <esp_timer.h>
 #include <esp_task_wdt.h>
-#include <nvs.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <mbedtls/sha256.h>
+#include <nvs.h>
 
 const char *const MediaHub_PathPrefix = "mediahub://";
 
@@ -2021,10 +2021,7 @@ static bool MediaHub_SyncCachedManifest(const String &manifestPath, uint16_t &do
 	const TimeReleaseConfig *timeReleasePtr = playMode == TIME_RELEASE ? &timeRelease : nullptr;
 	changed = String(cached["version"] | "") != String(remote["version"] | "")
 		|| (uint32_t) (cached["playMode"] | 0) != playMode
-		|| (playMode == TIME_RELEASE && ((uint32_t) (cached["timeReleaseStart"] | 0) != timeRelease.startTime
-			|| (uint32_t) (cached["timeReleaseInterval"] | 0) != timeRelease.intervalSecs
-			|| String(cached["timeReleaseIntervalUnit"] | "") != String(remote["timeReleaseIntervalUnit"] | "")
-			|| (uint32_t) (cached["timeReleaseIntervalValue"] | 0) != timeRelease.intervalValue));
+		|| (playMode == TIME_RELEASE && ((uint32_t) (cached["timeReleaseStart"] | 0) != timeRelease.startTime || (uint32_t) (cached["timeReleaseInterval"] | 0) != timeRelease.intervalSecs || String(cached["timeReleaseIntervalUnit"] | "") != String(remote["timeReleaseIntervalUnit"] | "") || (uint32_t) (cached["timeReleaseIntervalValue"] | 0) != timeRelease.intervalValue));
 	if (playMode == WEBSTREAM) {
 		const char *stream = remote["stream"] | "";
 		if (strlen(stream) == 0 || !MediaHub_PersistLocalAssignment(cardId, stream, WEBSTREAM)) {

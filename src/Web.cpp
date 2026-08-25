@@ -1106,8 +1106,11 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		}
 		char rfidString[512];
 		if (_playMode == TIME_RELEASE) {
-			if (months) snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
-			else snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+			if (months) {
+				snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
+			} else {
+				snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+			}
 		} else {
 			snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playMode, stringDelimiter);
 		}
@@ -2742,8 +2745,11 @@ static void handlePostRFIDRequest(AsyncWebServerRequest *request, JsonVariant &j
 	}
 	char rfidString[512];
 	if (_playModeOrModId == TIME_RELEASE) {
-		if (months) snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
-		else snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+		if (months) {
+			snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s0%s%" PRIu32 "%smonths", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, stringDelimiter, intervalValue, stringDelimiter);
+		} else {
+			snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0%s%" PRIu32 "%s%" PRIu32, stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter, stringDelimiter, start, stringDelimiter, interval);
+		}
 	} else {
 		snprintf(rfidString, sizeof(rfidString), "%s%s%s0%s%u%s0", stringDelimiter, _fileOrUrlAscii, stringDelimiter, stringDelimiter, _playModeOrModId, stringDelimiter);
 	}

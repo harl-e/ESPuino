@@ -1,11 +1,15 @@
 #pragma once
 
 #include <Arduino.h>
+
 #include <time.h>
 
 // Stored as optional fields in the existing RFID NVS assignment.  No data is
 // written to the physical tag.
-enum class TimeReleaseIntervalUnit : uint8_t { Seconds, Months };
+enum class TimeReleaseIntervalUnit : uint8_t {
+	Seconds,
+	Months
+};
 
 struct TimeReleaseConfig {
 	uint32_t startTime = 0; // Unix timestamp

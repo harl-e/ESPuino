@@ -51,8 +51,11 @@ int32_t TimeRelease_GetMaxTrack(const TimeReleaseConfig &config, size_t fileCoun
 	size_t high = fileCount - 1;
 	while (low < high) {
 		const size_t middle = low + (high - low + 1) / 2;
-		if (TimeRelease_MonthReleaseTime(config, middle) <= now) low = middle;
-		else high = middle - 1;
+		if (TimeRelease_MonthReleaseTime(config, middle) <= now) {
+			low = middle;
+		} else {
+			high = middle - 1;
+		}
 	}
 	return static_cast<int32_t>(low);
 }
