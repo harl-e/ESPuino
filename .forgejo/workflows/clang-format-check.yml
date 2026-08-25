@@ -5,13 +5,13 @@ on:
     paths:
       - "src/**"
       - ".clang-format"
-      - ".forgejo/workflows/clang-format.yml"
+      - ".forgejo/workflows/clang-format-check.yml"
 
   pull_request:
     paths:
       - "src/**"
       - ".clang-format"
-      - ".forgejo/workflows/clang-format.yml"
+      - ".forgejo/workflows/clang-format-check.yml"
 
   workflow_dispatch:
 
@@ -27,10 +27,38 @@ jobs:
     steps:
       - name: Checkout repository
         uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup Python 3.12
+        uses: https://code.forgejo.org/actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install clang-format 16
+        run: |
+          python -m pip install --disable-pip-version-check clang-format==16.0.6
+          clang-format --version
 
       - name: Run clang-format style check
-        uses: https://github.com/jidicula/clang-format-action@v4.18.0
-        with:
-          clang-format-version: "16"
-          check-path: "src"
-          fallback-style: "LLVM"
+        shell: bash
+        run: |
+          set -o pipefail
+
+          find src -type f \
+            \( -name "*.c" \
+            -o -name "*.cc" \
+            -o -name "*.cpp" \
+            -o -name "*.cxx" \
+            -o -name "*.h" \
+            -o -name "*.hh" \
+            -o -name "*.hpp" \
+            -o -name "*.hxx" \
+            -o -name "*.proto" \) \
+            -print0 \
+            | xargs -0 --no-run-if-empty \
+                clang-format \
+                --dry-run \
+                --Werror \
+                --style=file \
+                --fallback-style=LLVM
