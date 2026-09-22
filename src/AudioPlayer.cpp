@@ -2,7 +2,7 @@
 #include "settings.h"
 
 #include "AudioPlayer.h"
-
+#include "MediaHub.h"
 #include "Audio.h"
 #include "Bluetooth.h"
 #include "Cmd.h"
