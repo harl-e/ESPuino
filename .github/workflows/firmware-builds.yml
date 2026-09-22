@@ -1,0 +1,132 @@
+name: build-all-firmwares
+run-name: Build firmwares for all boards (all languages)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+      - master
+  pull_request:
+    paths:
+      - "src/*"
+      - "html/*"
+      - "test/*"
+      - "**.ini"
+      - "**.py"
+      - "**.csv"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test_builds:
+    timeout-minutes: 180
+    name: Run all Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          # - ttgo_t8 # disabled for now.
+          - lolin_d32_pro
+          - lolin_d32_pro_sdmmc_pe
+          - complete
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          # NB: the key must actually vary with the dependencies. The old key hashed
+          # '**/lockfiles' (a file that does not exist), so it was a constant and the
+          # cache never busted - a once-poisoned ~/.platformio (a broken SCons pulled in
+          # by an earlier "pio upgrade --dev") got restored on every run, causing
+          # "ModuleNotFoundError: No module named 'SCons.Tool.FortranCommon'" at link time.
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'dependencies.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO Core
+        run: |
+          # Pin PlatformIO Core. The latest core (6.2.0) requires tool-scons ~4.11.1, which
+          # installs over the platform's tool-scons 4.8.1 and no longer ships
+          # SCons.Tool.FortranCommon, so the pioarduino link step dies with
+          # "ModuleNotFoundError: No module named 'SCons.Tool.FortranCommon'". 6.1.19 pulls
+          # tool-scons 4.8.1 (the combination that builds cleanly locally). Revisit once the
+          # pioarduino platform is compatible with the newer SCons.
+          pip install -U setuptools "platformio==6.1.19"
+          pio pkg update --global
+          mkdir binaries
+
+      # --- Build 1: Language DE (Default) ---
+      - name: Build ${{ matrix.variant }} (DE)
+        run: |
+          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE DE/' src/settings.h
+          platformio run -e ${{ matrix.variant }}
+          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-DE.bin
+          # bootloader and partition table are language-independent, so copy them once (here, at the DE build)
+          cp .pio/build/${{ matrix.variant }}/bootloader.bin binaries/bootloader.bin
+          cp .pio/build/${{ matrix.variant }}/partitions.bin binaries/partitions.bin
+
+      # --- Build 2: Language EN ---
+      - name: Build ${{ matrix.variant }} (EN)
+        run: |
+          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE EN/' src/settings.h
+          platformio run -e ${{ matrix.variant }}
+          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-EN.bin
+
+      # --- Build 3: Language FR ---
+      - name: Build ${{ matrix.variant }} (FR)
+        run: |
+          sed -i -E 's/^[[:space:]]*#define LANGUAGE .*/\t#define LANGUAGE FR/' src/settings.h
+          platformio run -e ${{ matrix.variant }}
+          cp .pio/build/${{ matrix.variant }}/firmware.bin binaries/firmware-FR.bin
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}
+          path: binaries/
+
+  commit:
+    if: ${{ github.repository == 'biologist79/ESPuino' && (github.ref_name == 'dev' || github.ref_name == 'master') && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs: test_builds
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+        with:
+          repository: biologist79/ESPuino-Firmware
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          path: target-repo
+          persist-credentials: true
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: target-repo/Firmwares/${{ github.ref_name }}
+
+      - name: Commit and push changes
+        run: |
+          cd target-repo
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          mkdir -p Firmwares/${{ github.ref_name }}
+          git add Firmwares/${{ github.ref_name }}
+          git commit -m "Firmware built from commit biologist79/ESPuino@${{ github.sha }}" || echo "No changes to commit"
+          git push

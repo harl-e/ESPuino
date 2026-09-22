@@ -4,6 +4,7 @@
 #include "AudioPlayer.h"
 #include "Cmd.h"
 #include "Common.h"
+#include "Led.h"
 #include "Log.h"
 #include "MediaHub.h"
 #include "MemX.h"
@@ -128,6 +129,7 @@ void Rfid_PreferenceLookupHandler(void) {
 						// If pause is active, resume playback when the same RFID is put on again.
 						if (gPlayProperties.pausePlay && gPlayProperties.resumeOnSameRfid && Rfid_IsTagEligibleForResume(gCurrentRfidTagId)) {
 							Log_Printf(LOGLEVEL_INFO, "Same RFID while paused -> resume playback (%s)", gCurrentRfidTagId);
+							Led_IndicateRfidTagAccepted();
 							AudioPlayer_SetTrackControl(PAUSEPLAY);
 							return;
 						}
@@ -143,6 +145,10 @@ void Rfid_PreferenceLookupHandler(void) {
 						AudioPlayer_ArmRfidResetOnIdle();
 					}
 				}
+				// Only here, past the dontAcceptRfidTwice dedup: a tag that was refused as a duplicate
+				// did not do anything, so it must not be acknowledged as if it had.
+				Led_IndicateRfidTagAccepted();
+
 	#ifdef MQTT_ENABLE
 				publishMqtt(topicRfid, gCurrentRfidTagId, false);
 	#endif

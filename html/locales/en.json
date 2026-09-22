@@ -65,7 +65,9 @@
 			"dimmablestatesExp": "Number of intermediate steps per LED, used to make transitions (e.g. volume or progress indicator) smoother/finer.",
 			"offsetExp": "Shifts the first LED of the indicator by this many positions - useful if the LED ring shouldn't start at position 0.",
 			"offsetpauseExp": "Offsets the pause indicator by half an LED spacing compared to the normal idle indicator, so pause is visually distinguishable from idle.",
-			"reverserotationExp": "Reverses the direction the LED indicator runs in, e.g. for rings mounted counter-clockwise instead of clockwise."
+			"reverserotationExp": "Reverses the direction the LED indicator runs in, e.g. for rings mounted counter-clockwise instead of clockwise.",
+			"rfidflash": "Briefly flash all LEDs when a tag is recognized",
+			"rfidflashExp": "Acknowledges an assigned RFID tag with a brief green flash, so you can see that the tag was accepted. An unknown tag is still acknowledged in red."
 		},
 		"buttons": {
 			"title": "Button assignments",
@@ -107,12 +109,24 @@
 			"gesturesExp": "While one of these buttons is held down, turning the encoder triggers the assigned action instead of changing the volume. 'Turn right' is the direction that raises the volume. The long-press action of such a button fires when it is released - and not at all if the encoder was turned.",
 			"ccw": "turn left",
 			"cw": "turn right",
-			"seekPreviewTitle": "Seek preview settings",
-			"seekPreviewTitleExp": "Fine-tuning for the 🎯 seek preview gesture (see table above): how long to wait before a preview auto-commits, and how finely the target position can be steered by turning.",
+			"seekPreviewTitle": "Seeking with the rotary encoder",
+			"seekPreviewTitleExp": "Fine-tuning for seeking with the rotary encoder: the 🎯 seek-preview gesture (see table above) and direct seeking when a turn action is mapped to seek forwards/backwards.",
 			"seekPrevDelay": "Auto-commit delay [ms]",
 			"seekPrevDelayExp": "How long (in ms) the encoder must stay idle before a 🎯 seek-preview gesture jumps to the previewed position on its own. Releasing the held button always commits immediately, regardless of this delay. 0-3000, default 2000.",
 			"seekPrevSweep": "Turns for full sweep",
-			"seekPrevSweepExp": "How many encoder detents move the seek-preview target from 0% to 100% (blue LED) of the track. Lower = coarser/faster scrubbing, higher = finer control. Default 40."
+			"seekPrevSweepExp": "How many encoder detents move the seek-preview target from 0% to 100% (blue LED) of the track. Lower = coarser/faster scrubbing, higher = finer control. Default 40.",
+			"rotSeekStep": "Seek step per detent [s]",
+			"rotSeekStepExp": "How many seconds each detent seeks when a turn action is mapped directly to seek forwards/backwards (not the seek preview). Keep it small: a quick flick is many detents at once. 1-60, default 10.",
+			"directSeekTitle": "Direct seeking",
+			"directSeekHint": "The simple variant: every detent jumps forwards or backwards by the configured amount straight away - no display, no waiting. That is more immediate but also coarser, because a quick flick is many detents at once and you land correspondingly far away. In exchange it works even when your ESPuino has no Neopixels and a preview would therefore have nothing to show. This is how the rotary encoder is set up out of the box. Applies when you assign 'seek forwards' or 'seek backwards' to a turn action above.",
+			"previewSeekTitle": "Seek preview",
+			"previewSeekHint": "The more comfortable variant and the better choice for most people. As soon as you hold the assigned button down, the LED ring turns yellow - before you even start turning. That is the signal that the preview is running. Turning then does not move the actual playback at first; instead only a blue marker (cursor) travels to the spot that would be jumped to (if you have a single LED instead of a ring, it simply lights up blue while the preview is running). Playback only jumps there once you release the button or stop turning for a moment. That lets you take your time aiming at a spot and watch what you are doing, instead of feeling your way back and forth blindly. The two values below set how long ESPuino waits after the last turn and how many detents it takes to sweep across the whole track. Applies when you assign 'seek preview' to a turn action above."
+		},
+		"seek": {
+			"title": "Seeking with the buttons",
+			"titleExp": "Seek step for the button actions 'seek forwards' and 'seek backwards'.",
+			"jumpOffset": "Seek step per button press [s]",
+			"jumpOffsetExp": "How many seconds a press of 'seek forwards' / 'seek backwards' jumps within the current track. Applies immediately after saving. 1-120, default 30."
 		}
 	},
 	"wifi": {
@@ -229,7 +243,9 @@
 			"refresh": "Refresh",
 			"delete": "Delete",
 			"rename": "Rename",
-			"download": "Download"
+			"download": "Download",
+			"useAsBatteryWarning": "Use as battery warning",
+			"useAsBatteryWarningDone": "Set as the battery warning"
 		},
 		"files": {
 			"title": "Files",
@@ -289,8 +305,7 @@
 					"18": "🌐 MediaHub (content/mode comes from the selected media server)",
 					"19": "Timed release"
 				},
-				"error": "Invalid playmode",
-				"timeRelease": {"start": "Start date and time", "interval": "Interval", "minutes": "Minutes", "hours": "Hours", "days": "Days", "weeks": "Weeks", "months": "Months", "error": "Choose a start date and a positive interval."}
+				"error": "Invalid playmode"
 			},
 			"mediahub": {
 				"serverSelect": {
@@ -306,6 +321,7 @@
 					"placeholder": "e.g. 192.168.1.50:8080"
 				},
 				"addButton": "Save media server",
+				"openButton": "Open MediaHub",
 				"delete": {
 					"title": "Delete media server?",
 					"prompt": "Really delete the media server \"{{name}}\"? Cards already assigned to it are left unchanged."
@@ -471,7 +487,9 @@
 			"save": "Save Device",
 			"inProgress": "Scanning for devices...",
 			"noDevices": "No Bluetooth devices found",
-			"notAllowed": "Bluetooth device scan not allowed in current mode. Please switch to Bluetooth headphone mode first."
+			"notAllowed": "Bluetooth device scan not allowed in current mode. Please switch to Bluetooth headphone mode first.",
+			"unknownDevice": "Unknown device",
+			"connecting": "Connecting to {{device}}..."
 		},
 		"device": {
 			"title": "Bluetooth device (headphone)",
@@ -487,6 +505,17 @@
 			"title": "Bluetooth Mode Active",
 			"prompt": "Control via website is restricted in Bluetooth mode. Would you like to switch back to WiFi mode and restart?",
 			"button": "Switch to WiFi Mode"
+		},
+		"mode": {
+			"title": "Bluetooth mode",
+			"off": "Off",
+			"headphones": "Headphones",
+			"speaker": "Speaker",
+			"restartNotice": "Selecting a different mode restarts ESPuino."
+		},
+		"connection": {
+			"connected": "Connected to: {{device}}",
+			"disconnected": "Not connected"
 		}
 	},
 	"general": {
@@ -521,13 +550,16 @@
 				"description": "Select the type of RFID reader connected to your ESPuino. Auto-detect will try to determine the connected reader type automatically."
 			},
 			"pn5180Lpcd": "Enable PN5180 LPCD",
-			"pn5180LpcdExp": "Enable Low Power Card Detection for PN5180 RFID reader. Only possible if solder-pins are set correctly.",
+			"pn5180LpcdExp": "Enables Low Power Card Detection for the PN5180 RFID reader. PN5180 firmware version 4.0 or newer is required, and the required solder bridges must be configured correctly. More information <a href='https://forum.espuino.de/t/was-ist-lpcd-und-wie-funktioniert-es/1664' target='_blank'>here</a>.",
 			"mfrc522Gain": "MFRC522 Gain",
 			"mfrc522GainExp": "Sets the sensitivity of the MFRC522 RFID reader. Possible values are 0 (lowest sensitivity) to 7 (highest sensitivity). Default is 7.",
 			"mfrc522ScanInterval": "MFRC522 scan interval",
 			"mfrc522ScanIntervalExp": "Time in milliseconds between two polls of the MFRC522 RFID reader. A restart is required for a change to take effect. Default is 100ms.",
 			"pn5180Debounce": "PN5180 debounce",
-			"pn5180DebounceExp": "Time in milliseconds a card must go undetected before it's considered removed. Prevents brief read dropouts (e.g. with a larger gap between card and reader) from being mistaken for card removal. A restart is required for a change to take effect. Default is 500ms."
+			"pn5180DebounceExp": "Time in milliseconds a card must go undetected before it's considered removed. Prevents brief read dropouts (e.g. with a larger gap between card and reader) from being mistaken for card removal. A restart is required for a change to take effect. Default is 500ms.",
+			"slixPrivacyPassword": "ICODE-SLIX2 privacy password",
+			"slixPrivacyPasswordExp": "Four-byte password used to disable privacy mode on protected ICODE-SLIX2 tags. Only hexadecimal values from 00 to FF are accepted.",
+			"pn5180Firmware": "PN5180 firmware readout"
 		},
 		"options": {
 			"title": "Options",
@@ -550,6 +582,8 @@
 			"playLastRfidOnRebootExp": "Play last RFID tag on restart.",
 			"pauseOnMinVolume": "Pause at minimum volume",
 			"pauseOnMinVolumeExp": "Playback is paused when the volume reaches the minimum level. More information <a href='https://forum.espuino.de/t/lautstaerke-0-pause/1631' target='_blank'>here</a>",
+			"nightVolumeLimit": "Limit volume in night mode",
+			"nightVolumeLimitExp": "When night mode is switched on, the volume currently set becomes a temporary upper limit (plus one step of headroom) – handy when ESPuino is taken to bed. The limit is lifted again when night mode ends.",
 			"recoverVolBoot": "Use last volume at restart",
 			"recoverVolBootExp": "After a restart, the speaker remembers which volume was last used and automatically adjusts it again.",
 			"volumeCurve": "Finer gradations at low volume",
@@ -575,14 +609,22 @@
 			"lowCritical": "Lowest voltage (in volt), that is indicated by one LED",
 			"criticalShutoff": "Below this voltage (in volt), ESPuino turns off",
 			"high": "Voltage (in volt), that is indicated by all LEDs",
+			"offset": "Correction value for the measured battery voltage (in volt, ± in hundredths)",
 			"measureInterval": "Interval between measurements (in minutes)",
 			"shutdownOnCritical": "Automatically shut down on critical voltage",
 			"lowWarningExp": "Voltage below which a visual (LED) low-battery warning is triggered.",
 			"lowCriticalExp": "Voltage that is shown as 0% battery charge (empty battery).",
 			"highExp": "Voltage that is shown as 100% battery charge (full battery).",
+			"offsetExp": "Fine-correction of the measured battery voltage. If the displayed voltage differs from a multimeter reading, enter the difference here (positive or negative). Default for the Complete: -0.04 V.",
 			"criticalShutoffExp": "Voltage at which ESPuino automatically shuts down to protect the battery from deep discharge.",
 			"measureIntervalExp": "Time interval in minutes at which the battery voltage is measured.",
-			"shutdownOnCriticalExp": "Automatically shuts ESPuino down once the battery voltage drops below the critical threshold set below. Can help protect the battery from deep discharge to some extent, but does not replace a battery management system! Recommended values are: LFP: 2.7 V, LiPo: 3.0 V."
+			"shutdownOnCriticalExp": "Automatically shuts ESPuino down once the battery voltage drops below the critical threshold set below. Can help protect the battery from deep discharge to some extent, but does not replace a battery management system! Recommended values are: LFP: 2.7 V, LiPo: 3.0 V.",
+			"warnSound": "Announce a low battery",
+			"warnSoundExp": "Plays an audio file from the SD card when the battery runs low – playback is briefly interrupted and then resumes at exactly the same spot. Useful because the blinking LEDs are easily missed while listening, and by children in any case.",
+			"warnSoundFile": "Announcement file",
+			"warnSoundFileExp": "Path to the audio file on the SD card. The easiest way to pick it is a right-click in the file browser, \"Use as battery warning\". If the file is missing, nothing is interrupted and only an error is logged.",
+			"warnSoundOnce": "Announce only once",
+			"warnSoundOnceExp": "Without this option the announcement is repeated at every measurement while the battery stays below the warning threshold – so at the rate of the configured measurement interval. With this option it is announced only once, and is played again only after the voltage has risen above the warning threshold and then drops below it once more."
 		},
 		"playlist": {
 			"title": "Playlist",

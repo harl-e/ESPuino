@@ -22,6 +22,7 @@
 #include "MemX.h"
 #include "Mqtt.h"
 #include "Rfid.h"
+#include "RfidPn5180.h"
 #include "RotaryEncoder.h"
 #include "SdCard.h"
 #include "System.h"
@@ -37,12 +38,6 @@
 #include <atomic>
 #include <esp_task_wdt.h>
 #include <nvs.h>
-
-// An override written before this feature existed does not define it (settings-override.h replaces
-// settings.h wholesale), so fall back rather than break those builds.
-#ifndef JUMP_OFFSET_ROTARY
-	#define JUMP_OFFSET_ROTARY 10
-#endif
 
 typedef struct {
 	char nvsKey[cardIdStringSize];
@@ -97,6 +92,7 @@ static void handleGetWiFiConfig(AsyncWebServerRequest *request);
 static void handlePostWiFiConfig(AsyncWebServerRequest *request, JsonVariant &json);
 static void handleCoverImageRequest(AsyncWebServerRequest *request);
 static void handleBluetoothScanRequest(AsyncWebServerRequest *request);
+static void handleBluetoothStatusRequest(AsyncWebServerRequest *request);
 static void handleBluetoothResultsRequest(AsyncWebServerRequest *request);
 static void handleBluetoothConnectRequest(AsyncWebServerRequest *request, JsonVariant &json);
 static void handleWiFiScanRequest(AsyncWebServerRequest *request);
@@ -124,6 +120,20 @@ static void onWebsocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *clien
 static void settingsToJSON(JsonObject obj, const String section);
 static WebsocketCodeType JSONToSettings(JsonObject obj);
 static void webserverStart(void);
+
+static String slixPrivacyPasswordToHex(const SlixPrivacyPassword &password) {
+	char hex[9];
+	snprintf(hex, sizeof(hex), "%02X%02X%02X%02X", password[0], password[1], password[2], password[3]);
+	return String(hex);
+}
+
+static SlixPrivacyPassword slixPrivacyPasswordFromPrefs(void) {
+	SlixPrivacyPassword password = SLIX_PRIVACY_PASSWORD_DEFAULT;
+	if (gPrefsRfid.getBytesLength(SLIX_PRIVACY_PASSWORD_NVS_KEY) == password.size()) {
+		gPrefsRfid.getBytes(SLIX_PRIVACY_PASSWORD_NVS_KEY, password.data(), password.size());
+	}
+	return password;
+}
 
 // IPAddress converters, for a description see: https://arduinojson.org/news/2021/05/04/version-6-18-0/
 void convertFromJson(JsonVariantConst src, IPAddress &dst) {
@@ -677,6 +687,7 @@ void webserverStart(void) {
 		// Bluetooth-Scan and connect
 		wServer.on("/bluetoothscan", HTTP_GET, handleBluetoothScanRequest);
 		wServer.on("/bluetoothresults", HTTP_GET, handleBluetoothResultsRequest);
+		wServer.on("/bluetoothstatus", HTTP_GET, handleBluetoothStatusRequest);
 		wServer.addHandler(new AsyncCallbackJsonWebHandler("/bluetoothconnect", handleBluetoothConnectRequest));
 
 		// ESPuino logo: user-provided SD override takes precedence, otherwise fall back to the default
@@ -784,6 +795,9 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		if (generalObj["rotSeekStep"].is<uint8_t>()) {
 			success = success && (gPrefsSettings.putUChar("rotSeekStep", generalObj["rotSeekStep"].as<uint8_t>()) != 0);
 		}
+		if (generalObj["jumpOffset"].is<uint8_t>()) {
+			success = success && (gPrefsSettings.putUChar("jumpOffset", generalObj["jumpOffset"].as<uint8_t>()) != 0);
+		}
 		success = success && (gPrefsSettings.putBool("playMono", generalObj["playMono"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putBool("savePosShutdown", generalObj["savePosShutdown"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putBool("savePosRfidChge", generalObj["savePosRfidChge"].as<bool>()) != 0);
@@ -798,6 +812,7 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		success = success && (gPrefsSettings.putBool("dAccRfidTwice", generalObj["dontAcceptRfidTwice"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putBool("p2pSameRfid", generalObj["resumeOnSameRfid"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putBool("pauseOnMinVol", generalObj["pauseOnMinVol"].as<bool>()) != 0);
+		success = success && (gPrefsSettings.putBool("nightVolLimit", generalObj["nightVolLimit"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putBool("recoverVolBoot", generalObj["recoverVolBoot"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putUChar("volumeCurve", generalObj["volumeCurve"].as<uint8_t>()) != 0);
 		success = success && (gPrefsRfid.putUChar("rfidReaderType", generalObj["rfidReaderType"].as<uint8_t>()) != 0);
@@ -805,6 +820,45 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		success = success && (gPrefsRfid.putUChar("mfrc522Gain", generalObj["mfrc522Gain"].as<uint8_t>()) != 0);
 		success = success && (gPrefsRfid.putUShort("rfidScanIntv", generalObj["mfrc522ScanInterval"].as<uint16_t>()) != 0);
 		success = success && (gPrefsRfid.putUShort("pn5180Debounce", generalObj["pn5180Debounce"].as<uint16_t>()) != 0);
+
+		// Keep compatibility with older cached management pages: if the field is missing,
+		// preserve the password already stored in NVS instead of overwriting it.
+		String slixPrivacyPassword = generalObj["slixPrivacyPassword"].as<String>();
+		if (slixPrivacyPassword.length() > 0) {
+			SlixPrivacyPassword slixPassword = {};
+			bool validPassword = (slixPrivacyPassword.length() == slixPassword.size() * 2);
+			for (size_t i = 0; validPassword && i < slixPassword.size(); i++) {
+				auto hexNibble = [](char c) -> int8_t {
+					if ((c >= '0') && (c <= '9')) {
+						return c - '0';
+					}
+					if ((c >= 'A') && (c <= 'F')) {
+						return c - 'A' + 10;
+					}
+					if ((c >= 'a') && (c <= 'f')) {
+						return c - 'a' + 10;
+					}
+					return -1;
+				};
+				const int8_t high = hexNibble(slixPrivacyPassword[i * 2]);
+				const int8_t low = hexNibble(slixPrivacyPassword[i * 2 + 1]);
+				if ((high < 0) || (low < 0)) {
+					validPassword = false;
+				} else {
+					slixPassword[i] = static_cast<uint8_t>((high << 4) | low);
+				}
+			}
+			if (validPassword) {
+				const bool passwordStored = success && (gPrefsRfid.putBytes(SLIX_PRIVACY_PASSWORD_NVS_KEY, slixPassword.data(), slixPassword.size()) == slixPassword.size());
+				success = passwordStored;
+				if (passwordStored) {
+					RfidPn5180_SetSlixPrivacyPassword(slixPassword);
+				}
+			} else {
+				success = false;
+				Log_Println("Invalid ICODE-SLIX2 privacy password in web settings", LOGLEVEL_ERROR);
+			}
+		}
 		if (!success) {
 			Log_Printf(LOGLEVEL_ERROR, webSaveSettingsError, "general");
 			return WebsocketCodeType::Error;
@@ -812,6 +866,9 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 
 		// Apply the new maximum-volume limits immediately; no reboot is required.
 		AudioPlayer_ApplyMaxVolumes(maxVolumeSp, maxVolumeHp);
+		// Takes effect the next time night mode is switched on; an already running night mode keeps the
+		// ceiling it was armed with (or none), so the setting never changes the limit under way.
+		AudioPlayer_SetNightVolumeLimitEnabled(generalObj["nightVolLimit"].as<bool>());
 
 		gPlayProperties.newPlayMono = generalObj["playMono"].as<bool>();
 		gPlayProperties.SavePlayPosRfidChange = generalObj["savePosRfidChge"].as<bool>();
@@ -867,6 +924,7 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		success = success && (gPrefsSettings.putUChar("numControl", ledObj["numControl"].as<uint8_t>()) != 0);
 		success = success && (gPrefsSettings.putUChar("numIdleDots", ledObj["numIdleDots"].as<uint8_t>()) != 0);
 		success = success && (gPrefsSettings.putBool("offsetPause", ledObj["offsetPause"].as<bool>()) != 0);
+		success = success && (gPrefsSettings.putBool("ledRfidFlash", ledObj["rfidFlash"].as<bool>()) != 0);
 		success = success && (gPrefsSettings.putShort("hueStart", ledObj["hueStart"].as<int16_t>()) != 0);
 		success = success && (gPrefsSettings.putShort("hueEnd", ledObj["hueEnd"].as<int16_t>()) != 0);
 		success = success && (gPrefsSettings.putShort("hueAtmo", ledObj["hueAtmo"].as<int16_t>()) != 0);
@@ -966,10 +1024,16 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 	}
 	if (doc["battery"].is<JsonObject>()) {
 		// Battery settings
-		if (gPrefsSettings.putFloat("wLowVoltage", doc["battery"]["warnLowVoltage"].as<float>()) == 0 || gPrefsSettings.putFloat("vIndicatorLow", doc["battery"]["indicatorLow"].as<float>()) == 0 || gPrefsSettings.putFloat("vIndicatorHigh", doc["battery"]["indicatorHi"].as<float>()) == 0 || gPrefsSettings.putFloat("wCritVoltage", doc["battery"]["criticalVoltage"].as<float>()) == 0 || gPrefsSettings.putBool("shutdownBatCrit", doc["battery"]["shutdownOnCritical"].as<bool>()) == 0 || gPrefsSettings.putUInt("vCheckIntv", doc["battery"]["voltageCheckInterval"].as<uint8_t>()) == 0) {
+		if (gPrefsSettings.putFloat("wLowVoltage", doc["battery"]["warnLowVoltage"].as<float>()) == 0 || gPrefsSettings.putFloat("vIndicatorLow", doc["battery"]["indicatorLow"].as<float>()) == 0 || gPrefsSettings.putFloat("vIndicatorHigh", doc["battery"]["indicatorHi"].as<float>()) == 0 || gPrefsSettings.putFloat("wCritVoltage", doc["battery"]["criticalVoltage"].as<float>()) == 0 || gPrefsSettings.putFloat("offsetVoltage", doc["battery"]["offsetVoltage"].as<float>()) == 0 || gPrefsSettings.putBool("shutdownBatCrit", doc["battery"]["shutdownOnCritical"].as<bool>()) == 0 || gPrefsSettings.putUInt("vCheckIntv", doc["battery"]["voltageCheckInterval"].as<uint8_t>()) == 0) {
 			Log_Printf(LOGLEVEL_ERROR, webSaveSettingsError, "battery");
 			return WebsocketCodeType::Error;
 		}
+		// Kept out of the "== 0 means failure" chain above: putString() returns strlen(), so clearing the
+		// path to "" would be misread as an error even though the write succeeded.
+		gPrefsSettings.putBool("batWarnSound", doc["battery"]["warnSound"].as<bool>());
+		gPrefsSettings.putBool("batWarnOnce", doc["battery"]["warnSoundOnce"].as<bool>());
+		const char *warnSoundFile = doc["battery"]["warnSoundFile"].as<const char *>();
+		gPrefsSettings.putString("batWarnFile", warnSoundFile ? warnSoundFile : "");
 		Battery_Init();
 	}
 	if (doc["playlist"].is<JsonObject>()) {
@@ -1200,7 +1264,8 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		generalObj["maxVolumeSp"].set(gPrefsSettings.getUInt("maxVolumeSp", 21));
 		generalObj["maxVolumeHp"].set(gPrefsSettings.getUInt("maxVolumeHp", 21));
 		generalObj["sleepInactivity"].set(gPrefsSettings.getUInt("mInactiviyT", 10));
-		generalObj["rotSeekStep"].set(gPrefsSettings.getUChar("rotSeekStep", JUMP_OFFSET_ROTARY)); // seconds per detent when seeking via a rotary gesture
+		generalObj["rotSeekStep"].set(gPrefsSettings.getUChar("rotSeekStep", SEEK_STEP_ROTARY_DEFAULT)); // seconds per detent when seeking via a rotary gesture
+		generalObj["jumpOffset"].set(gPrefsSettings.getUChar("jumpOffset", SEEK_STEP_BUTTON_DEFAULT)); // seconds to jump per button press when seeking
 		generalObj["playMono"].set(gPrefsSettings.getBool("playMono", false));
 		generalObj["savePosShutdown"].set(gPrefsSettings.getBool("savePosShutdown", false)); // SAVE_PLAYPOS_BEFORE_SHUTDOWN
 		generalObj["savePosRfidChge"].set(gPrefsSettings.getBool("savePosRfidChge", false)); // SAVE_PLAYPOS_WHEN_RFID_CHANGE
@@ -1214,9 +1279,25 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		generalObj["mfrc522Gain"].set(gPrefsRfid.getUChar("mfrc522Gain", 7)); // MFRC522_GAIN
 		generalObj["mfrc522ScanInterval"].set(gPrefsRfid.getUShort("rfidScanIntv", 100)); // RFID_SCAN_INTERVAL
 		generalObj["pn5180Debounce"].set(gPrefsRfid.getUShort("pn5180Debounce", 500)); // PN5180 debounce (ms)
+
+		const String slixPasswordHex = slixPrivacyPasswordToHex(slixPrivacyPasswordFromPrefs());
+		generalObj["slixPrivacyPassword"].set(slixPasswordHex);
 		generalObj["pauseOnMinVol"].set(gPrefsSettings.getBool("pauseOnMinVol", false)); // PAUSE_ON_MIN_VOLUME
+		generalObj["nightVolLimit"].set(gPrefsSettings.getBool("nightVolLimit", false)); // NIGHT_MODE_VOLUME_LIMIT
 		generalObj["recoverVolBoot"].set(gPrefsSettings.getBool("recoverVolBoot", false)); // USE_LAST_VOLUME_AFTER_REBOOT
 		generalObj["volumeCurve"].set(gPrefsSettings.getUChar("volumeCurve", 0)); // VOLUMECURVE
+	}
+	if (section == "rfidstatus") {
+		JsonObject rfidStatusObj = obj["rfidStatus"].to<JsonObject>();
+		uint8_t firmwareMajor = 0;
+		uint8_t firmwareMinor = 0;
+		if (RfidPn5180_GetFirmwareVersion(firmwareMajor, firmwareMinor)) {
+			char firmwareVersion[8];
+			snprintf(firmwareVersion, sizeof(firmwareVersion), "%u.%u", firmwareMajor, firmwareMinor);
+			rfidStatusObj["pn5180Firmware"].set(firmwareVersion);
+		} else {
+			rfidStatusObj["pn5180Firmware"].set("");
+		}
 	}
 	if ((section == "") || (section == "equalizer")) {
 		// equalizer settings
@@ -1274,6 +1355,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		}
 		ledObj["numIdleDots"].set(gPrefsSettings.getUChar("numIdleDots", 4)); // NUM_LEDS_IDLE_DOTS
 		ledObj["offsetPause"].set(gPrefsSettings.getBool("offsetPause", false)); // OFFSET_PAUSE_LEDS
+		ledObj["rfidFlash"].set(gPrefsSettings.getBool("ledRfidFlash", false)); // LED_FLASH_ON_RFID
 		ledObj["hueStart"].set(gPrefsSettings.getShort("hueStart", 85)); // PROGRESS_HUE_START
 		ledObj["hueEnd"].set(gPrefsSettings.getShort("hueEnd", -1)); // PROGRESS_HUE_END
 		ledObj["hueAtmo"].set(gPrefsSettings.getShort("hueAtmo", 10)); // ATMO_HUE
@@ -1345,7 +1427,11 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		batteryObj["indicatorLow"].set(gPrefsSettings.getFloat("vIndicatorLow", s_voltageIndicatorLow));
 		batteryObj["indicatorHi"].set(gPrefsSettings.getFloat("vIndicatorHigh", s_voltageIndicatorHigh));
 		batteryObj["criticalVoltage"].set(gPrefsSettings.getFloat("wCritVoltage", s_warningCriticalVoltage));
+		batteryObj["offsetVoltage"].set(gPrefsSettings.getFloat("offsetVoltage", s_offsetVoltage));
 		batteryObj["shutdownOnCritical"].set(gPrefsSettings.getBool("shutdownBatCrit", false)); // SHUTDOWN_ON_BAT_CRITICAL
+		batteryObj["warnSound"].set(gPrefsSettings.getBool("batWarnSound", false)); // spoken low-battery warning
+		batteryObj["warnSoundOnce"].set(gPrefsSettings.getBool("batWarnOnce", false));
+		batteryObj["warnSoundFile"].set(gPrefsSettings.getString("batWarnFile", ""));
 	#endif
 
 		batteryObj["voltageCheckInterval"].set(gPrefsSettings.getUInt("vCheckIntv", s_batteryCheckInterval));
@@ -1369,6 +1455,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		genSettings["dontAcceptRfidTwice"].set(false); // DONT_ACCEPT_SAME_RFID_TWICE
 		genSettings["resumeOnSameRfid"].set(false); // RESUME_ON_SAME_RFID
 		genSettings["pauseOnMinVol"].set(false); // PAUSE_ON_MIN_VOLUME
+		genSettings["nightVolLimit"].set(false); // NIGHT_MODE_VOLUME_LIMIT
 		genSettings["recoverVolBoot"].set(false); // USE_LAST_VOLUME_AFTER_REBOOT
 		genSettings["volumeCurve"].set(0u); // VOLUME_CURVE
 		genSettings["rfidReaderType"].set(0u); // RFID_READER_TYPE_RUNTIME (auto-detect)
@@ -1376,6 +1463,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		genSettings["mfrc522Gain"].set(7u); // MFRC522_GAIN default (max gain)
 		genSettings["mfrc522ScanInterval"].set(100u); // RFID_SCAN_INTERVAL default
 		genSettings["pn5180Debounce"].set(500u); // PN5180 debounce (ms) default
+		genSettings["slixPrivacyPassword"].set(slixPrivacyPasswordToHex(SLIX_PRIVACY_PASSWORD_DEFAULT));
 		JsonObject eqSettings = defaultsObj["equalizer"].to<JsonObject>();
 		eqSettings["gainHighPass"].set(0);
 		eqSettings["gainBandPass"].set(0);
@@ -1389,6 +1477,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		ledSettings["numControl"].set(0u); // NUM_CONTROL_LEDS
 		ledSettings["numIdleDots"].set(4u); // NUM_LEDS_IDLE_DOTS
 		ledSettings["offsetPause"].set(false); // OFFSET_PAUSE_LEDS
+		ledSettings["rfidFlash"].set(false); // LED_FLASH_ON_RFID
 		ledSettings["hueStart"].set(85); // PROGRESS_HUE_START
 		ledSettings["hueEnd"].set(-1); // PROGRESS_HUE_END
 		ledSettings["hueAtmo"].set(10); // ATMO_HUE
@@ -1454,6 +1543,9 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		batSettings["indicatorHi"].set(s_voltageIndicatorHigh);
 		batSettings["criticalVoltage"].set(s_warningCriticalVoltage);
 		batSettings["shutdownOnCritical"].set(false); // SHUTDOWN_ON_BAT_CRITICAL
+		batSettings["warnSound"].set(false);
+		batSettings["warnSoundOnce"].set(false);
+		batSettings["warnSoundFile"].set("");
 	#endif
 		batSettings["voltageCheckInterval"].set(s_batteryCheckInterval);
 #endif
@@ -3160,6 +3252,35 @@ static void handleCoverImageRequest(AsyncWebServerRequest *request) {
 	});
 	response->addHeader("Cache-Control", "no-cache, must-revalidate");
 	request->send(response);
+}
+
+// Returns the current Bluetooth headphone connection state.
+// This is intentionally a normal HTTP endpoint so opening/reloading the web UI
+// does not depend on having witnessed the A2DP connection event via websocket.
+static void handleBluetoothStatusRequest(AsyncWebServerRequest *request) {
+#ifdef BLUETOOTH_ENABLE
+	AsyncJsonResponse *response = new AsyncJsonResponse(false);
+	JsonObject object = response->getRoot();
+
+	String name;
+	String address;
+	const bool connected = Bluetooth_GetConnectedSourceInfo(name, address);
+	object["connected"] = connected;
+
+	if (connected) {
+		if (address.length() > 0) {
+			object["address"] = address;
+		}
+		if (name.length() > 0) {
+			object["name"] = name;
+		}
+	}
+
+	response->setLength();
+	request->send(response);
+#else
+	request->send(200, "application/json", "{\"connected\":false}");
+#endif
 }
 
 // Handles Bluetooth scan requests

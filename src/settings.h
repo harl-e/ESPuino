@@ -213,13 +213,6 @@
 		constexpr uint16_t headphoneLastDetectionDebounce = 1000; // Debounce-interval in ms when plugging in headphone
 	#endif
 
-	// Seekmode-configuration
-	constexpr uint8_t jumpOffset = 30;                            // Offset in seconds to jump for commands CMD_SEEK_FORWARDS / CMD_SEEK_BACKWARDS
-	#define JUMP_OFFSET_ROTARY 10                                 // Offset in seconds per encoder-detent when seeking via a rotary gesture. A button press is a
-	                                                              // deliberate act and can afford jumpOffset; a flick of the encoder is many detents at once, so
-	                                                              // reusing jumpOffset there scrubs minutes at a time. Overridable at runtime via NVS "rotSeekStep".
-	                                                              // A macro (not constexpr) so Button/RotaryEncoder can #ifndef-default it for older overrides.
-
 	// Topics for MQTT: used to build actual topics in webinterface. So normally there's no need to apply any changes here 
 	// MQTT configuration available via webinterface: https://forum.espuino.de/t/dokumentation-webinterface/2807.
 	#ifdef MQTT_ENABLE
@@ -232,6 +225,7 @@
 		constexpr const char topicTrackControl[] = "trackcontrol"; // Cmnd: playback control (1=stop,3=play/pause,4=next,5=prev,6=first,7=last,8=next folder,9=prev folder)
 		constexpr const char topicLoudness[] = "loudness";    // Cmnd/State: set / report volume (numeric)
 		constexpr const char topicSleepTimer[] = "sleep_timer"; // Cmnd/State: sleep timer commands (EOP/EOT/EO5T, minutes, or 0 to deactivate)
+		constexpr const char topicSleepTimerState[] = "sleep_timer_state"; // State: JSON {mode,remainingMinutes,remainingTracks}; mode = OFF/MINUTES/EOT/EOP/EO5T
 		constexpr const char topicLockControls[] ="lock_controls"; // Cmnd/State: lock or unlock physical controls (ON/OFF)
 		constexpr const char topicRepeatMode[] = "repeatmode"; // Cmnd/State: set repeat mode (0=no,1=track,2=playlist,3=both)
 		constexpr const char topicLedBrightness[] = "led_brightness"; // Cmnd/State: set LED brightness 0..255

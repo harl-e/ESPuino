@@ -18,7 +18,7 @@
 #include <algorithm>
 
 static void Cmd_HandleSleepAction(bool enable, const char *enLogMsg, const char *enMqttMsg) {
-	Led_SetNightmode(enable);
+	System_SetNightmode(enable);
 	if (enable) {
 		Log_Println(enLogMsg, LOGLEVEL_INFO);
 #ifdef MQTT_ENABLE
@@ -132,16 +132,20 @@ void Cmd_Action(const uint16_t mod) {
 
 			gPlayProperties.sleepAfterCurrentTrack = false;
 			gPlayProperties.sleepAfterPlaylist = false;
-			gPlayProperties.sleepAfter5Tracks = !gPlayProperties.sleepAfter5Tracks;
 
-			if (gPlayProperties.sleepAfter5Tracks) {
-				if (gPlayProperties.currentTrackNumber + 5 > gPlayProperties.playlist->size()) {
-					// execute a sleep after end of playlist
-					Cmd_Action(CMD_SLEEP_AFTER_END_OF_PLAYLIST);
-					break;
-				}
+			// Drive playUntilTrackNumber -- the only flag AudioPlayer_Loop() actually acts on for
+			// "sleep after N tracks"; the old sleepAfter5Tracks flag was written but never read, so this
+			// modification card never triggered a sleep. Same semantics as the MQTT EO5T command.
+			if (gPlayProperties.playUntilTrackNumber > 0) {
+				gPlayProperties.playUntilTrackNumber = 0; // reapplying the card toggles it off
+			} else if ((gPlayProperties.playlist->size() - 1) >= (gPlayProperties.currentTrackNumber + 5)) {
+				gPlayProperties.playUntilTrackNumber = gPlayProperties.currentTrackNumber + 5;
+			} else {
+				// fewer than 5 tracks left -> fall back to sleep at end of playlist
+				Cmd_Action(CMD_SLEEP_AFTER_END_OF_PLAYLIST);
+				break;
 			}
-			Cmd_HandleSleepAction(gPlayProperties.sleepAfter5Tracks, sleepTimerEO5, "EO5T");
+			Cmd_HandleSleepAction(gPlayProperties.playUntilTrackNumber > 0, sleepTimerEO5, "EO5T");
 			System_IndicateOk();
 			break;
 		}
@@ -185,7 +189,7 @@ void Cmd_Action(const uint16_t mod) {
 		}
 
 		case CMD_DIMM_LEDS_NIGHTMODE: {
-			Led_ToggleNightmode();
+			System_ToggleNightmode();
 			System_IndicateOk();
 			break;
 		}
@@ -382,12 +386,13 @@ void Cmd_Action(const uint16_t mod) {
 		case CMD_SEEK_FORWARDS: {
 			// Accumulate rather than set a flag: the flag was a single overwrite-able enum consumed once per
 			// audio-loop iteration, so N detents of a fast rotary spin collapsed into a single jump.
-			AudioPlayer_AddSeekOffset(jumpOffset);
+			// Read per use (like rotSeekStep in RotaryEncoder.cpp) so a change in the web UI applies at once.
+			AudioPlayer_AddSeekOffset(static_cast<int16_t>(gPrefsSettings.getUChar("jumpOffset", SEEK_STEP_BUTTON_DEFAULT)));
 			break;
 		}
 
 		case CMD_SEEK_BACKWARDS: {
-			AudioPlayer_AddSeekOffset(-static_cast<int16_t>(jumpOffset));
+			AudioPlayer_AddSeekOffset(-static_cast<int16_t>(gPrefsSettings.getUChar("jumpOffset", SEEK_STEP_BUTTON_DEFAULT)));
 			break;
 		}
 

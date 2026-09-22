@@ -1,6 +1,6 @@
 # ESPuino - RFID-controlled Audio Player based on ESP32 with I2S-DAC Support
 
-![build workflow](https://github.com/biologist79/ESPuino/actions/workflows/test-builds.yml/badge.svg)
+![build workflow](https://github.com/biologist79/ESPuino/actions/workflows/firmware-builds.yml/badge.svg)
 
 ## Forum
 
@@ -12,6 +12,15 @@
   dort mit eurem Github-Login einloggen, jedoch auch "normal" anmelden. Dokumentation findet ihr
   insbesondere hier: <https://forum.espuino.de/c/dokumentation/anleitungen/10>.
 
+## Handbook
+
+- EN: A comprehensive handbook (German, English, French) covering setup, hardware, the web
+  interface, and troubleshooting is available at <https://biologist79.github.io/ESPuino-Docs/>. It
+  always describes the current state of the `dev` branch.
+- DE: Ein ausführliches Handbuch (Deutsch, Englisch, Französisch) zu Aufbau, Hardware, Webinterface
+  und Troubleshooting gibt es unter <https://biologist79.github.io/ESPuino-Docs/>. Es beschreibt
+  immer den aktuellen Stand des `dev`-Branches.
+
 ## Firmwares
 
 Ready-to-use firmwares are available for [download](https://github.com/biologist79/ESPuino-Firmware) for several
@@ -20,8 +29,6 @@ HALs with or without bluetooth support enabled. These are provided for
 [dev-branch](https://github.com/biologist79/ESPuino-Firmware/tree/main/Firmwares/dev).
 
 ## News
-
-> :warning: Type to rfid (PN5180, RC522-spi, RC522-i2c is now being autodetected at start)
 
 > :warning: Due to memory restrictions and complexity, ESPuino doesn't run safely on ESP32
 without PSRAM. So please make sure to use an ESP32-WROVER!
@@ -478,6 +485,20 @@ handy. Every time you change or add a new assignment between a RFID tag and an a
 backup file is saved on the SD card. The file's name can be changed via `backupFile`. So better
 don't delete it! Using the web interface you can use the upload form to import such a file.
 
+### MediaHub (optional)
+
+MediaHub is an optional way to manage the RFID-tag assignments of one or more ESPuinos
+**centrally**, instead of configuring each device's SD card and NVS individually. It's a small,
+self-hosted server (a Docker container running on your own network) that holds the assignments. A
+card assigned to a MediaHub server fetches its content and playback mode from the server when
+tapped, and downloads the referenced files to its own SD card on first use - kept in sync
+afterwards, with force-refresh and integrity checks. Webradio/webstream assignments work too. You
+register your MediaHub server(s) in the web interface (Files/RFID → MediaHub); the hub itself runs
+separately, see [ESPuino-MediaHub](https://github.com/biologist79/ESPuino-Mediahub).
+
+For a full description, setup and discussion, refer to the [MediaHub thread in the
+forum](https://forum.espuino.de/t/espuino-mediahub/4607).
+
 ### Smarthome/MQTT (optional)
 
 Everything that can be controlled via RFID tags and buttons, can also be controlled via MQTT
@@ -517,6 +538,7 @@ described as follows.
 | topicCoverChanged       | (flag)          | State: indicates cover image may have changed (load only if visible)                                                                                |
 | topicLoudness           | Cmnd/State: 0 -> 21 | Set/report loudness (depends on minVolume / maxVolume)                                                                                               |
 | topicSleepTimer         | Cmnd/State: EOP / EOT / EO5T / 1->2^32 / 0 | Cmnd: set sleep timer (EOP/EOT/EO5T or minutes; 0 to deactivate). State: current timer value (e.g. `EOP`, `EOT`, `EO5T`, `0`, ...) |
+| topicSleepTimerState    | State: JSON     | State: live sleep-timer status as JSON, e.g. `{"mode":"MINUTES","remainingMinutes":29,"remainingTracks":0}`. `mode` is `OFF`/`MINUTES`/`EOT`/`EOP`/`EO5T`; `remainingMinutes` counts down for a minute-timer, `remainingTracks` for `EOT`/`EO5T`/`EOP`. Read-only companion to `topicSleepTimer` |
 | topicState              | Online, Offline | `Online` when powering on, `Offline` when powering off                                                                                                 |
 | topicCurrentIPv4IP      | IPv4-string     | Sends ESPuino's IP-address (e.g. `192.168.2.78`)                                                                                                       |
 | topicPausePlay          | idle, play, pause | Sends playback state: `idle` (no playback), `play` (playing), `pause` (paused)                                                                         |
