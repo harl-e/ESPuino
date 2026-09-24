@@ -2,7 +2,7 @@
 #include "settings.h"
 
 #include "AudioPlayer.h"
-#include "MediaHub.h"
+
 #include "Audio.h"
 #include "Bluetooth.h"
 #include "Cmd.h"
@@ -10,6 +10,7 @@
 #include "EnumUtils.h"
 #include "Led.h"
 #include "Log.h"
+#include "MediaHub.h"
 #include "MemX.h"
 #include "Mqtt.h"
 #include "Port.h"
