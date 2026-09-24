@@ -1832,8 +1832,13 @@ size_t AudioPlayer_NvsRfidWriteWrapper(const char *_rfidCardId, const uint32_t _
 	const String existing(firstPart);
 	String timeReleaseSuffix;
 	if (_playMode == TIME_RELEASE) {
+		// The TIME_RELEASE tail starts behind the fifth delimiter (after
+		// trackLastPlayed). Stopping at the fourth left the previous
+		// trackLastPlayed at the start of the suffix, which shifted every
+		// time-release field by one on the next lookup and made the card
+		// unusable (NVS validation error on every tap).
 		int delimiter = -1;
-		for (uint8_t count = 0; count < 4; ++count) {
+		for (uint8_t count = 0; count < 5; ++count) {
 			delimiter = existing.indexOf(stringDelimiter, delimiter + 1);
 			if (delimiter < 0) {
 				break;
