@@ -113,7 +113,7 @@ jobs:
 
     if: >-
       forgejo.event_name != 'pull_request' &&
-      (forgejo.ref_name == 'dev' || forgejo.ref_name == 'master')
+      (forgejo.ref_name == 'dev' || forgejo.ref_name == 'master'|| forgejo.ref_name == 'harle/dev')
 
     steps:
       - name: Checkout firmware repository
