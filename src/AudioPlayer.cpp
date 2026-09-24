@@ -246,7 +246,7 @@ void Audio_InfoCallback(Audio::msg_t m) {
 		}
 		case Audio::evt_eof: { // end of file
 			Log_Printf(LOGLEVEL_INFO, "end of file:  %s", m.msg);
-			if (gPlayProperties.playMode == AUDIOBOOK) {
+			if (gPlayProperties.playMode == AUDIOBOOK || gPlayProperties.playMode == AUDIOBOOK_RECURSIVE) {
 				AudioPlayer_AudiobookTrackEofTimestamp = millis();
 				Log_Printf(LOGLEVEL_DEBUG, "Audiobook EOF: track %u finished at %u ms", gPlayProperties.currentTrackNumber + 1, AudioPlayer_AudiobookTrackEofTimestamp);
 			}
@@ -947,10 +947,10 @@ void AudioPlayer_Loop() {
 				gPlayProperties.playlistFinished = true;
 				return;
 			}
-			// For a normal AUDIOBOOK transition, start the next file before the synchronous NVS
+			// For an AUDIOBOOK/AUDIOBOOK_RECURSIVE transition, start the next file before the synchronous NVS
 			// write. Other playmodes (including AUDIOBOOK_LOOP) keep their exact existing order.
-			deferAudiobookPositionSave = gPlayProperties.playMode == AUDIOBOOK && !gPlayProperties.repeatCurrentTrack
-				&& gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size();
+			deferAudiobookPositionSave = (gPlayProperties.playMode == AUDIOBOOK || gPlayProperties.playMode == AUDIOBOOK_RECURSIVE) && gPlayProperties.saveLastPlayPosition
+				&& !gPlayProperties.repeatCurrentTrack && gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size();
 			if (gPlayProperties.saveLastPlayPosition && !deferAudiobookPositionSave) { // Don't save for AUDIOBOOK_LOOP because not necessary
 				if (gPlayProperties.currentTrackNumber + 1 < gPlayProperties.playlist->size()) {
 					// Only save if there's another track, otherwise it will be saved at end of playlist anyway
@@ -958,6 +958,10 @@ void AudioPlayer_Loop() {
 				}
 			}
 			if (gPlayProperties.sleepAfterCurrentTrack) { // Go to sleep if "sleep after track" was requested
+				if (deferAudiobookPositionSave) { // sleep supersedes the deferred save, flush it before going down
+					AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber + 1);
+					deferAudiobookPositionSave = false;
+				}
 				gPlayProperties.playlistFinished = true;
 				gPlayProperties.playMode = NO_PLAYLIST;
 				System_RequestSleep();
@@ -986,6 +990,9 @@ void AudioPlayer_Loop() {
 				audio->stopSong();
 				trackCommand = NO_ACTION;
 				Log_Println(cmndStop, LOGLEVEL_INFO);
+				if (deferAudiobookPositionSave) { // stop supersedes the deferred save, flush it before going idle
+					AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber);
+				}
 				gPlayProperties.pausePlay = true;
 				gPlayProperties.playlistFinished = true;
 				gPlayProperties.playMode = NO_PLAYLIST;
@@ -1288,28 +1295,25 @@ void AudioPlayer_Loop() {
 			audioReturnCode = audio->connecttohost(gPlayProperties.playlist->at(gPlayProperties.currentTrackNumber));
 			gPlayProperties.playlistFinished = false;
 		} else if (gPlayProperties.playMode != WEBSTREAM && !gPlayProperties.isWebstream) {
-			// Files from SD
-			if (!gFSystem.exists(gPlayProperties.playlist->at(gPlayProperties.currentTrackNumber))) { // Check first if file/folder exists
+			// Files from SD. No extra exists() probe here: it costs an SD round-trip in the
+			// track-transition path, and connecttoFS() already fails cleanly on a missing file
+			// (the !audioReturnCode branch below logs and advances, just like the old check did).
+			int32_t fileStartTime = -1;
+			AudioPlayer_resumeSeekPendingSecs = 0; // default: no deferred seek for this track
+			if (gPlayProperties.startAtFilePos > 0) {
+				fileStartTime = gPlayProperties.startAtFilePos;
+				// Also arm a deferred seek: ESP32-audioI2S only honors this connecttoFS() start
+				// position for files whose Xing/VBR header sets m_nominal_bitrate. Headerless CBR
+				// audiobooks never get seeked here and restart from 0, so we re-seek ourselves once
+				// the measured bitrate is known (see AudioPlayer_Loop). Harmless for VBR (skipped).
+				AudioPlayer_resumeSeekPendingSecs = gPlayProperties.startAtFilePos;
+				Log_Printf(LOGLEVEL_NOTICE, trackStartatPos, gPlayProperties.startAtFilePos);
+				gPlayProperties.startAtFilePos = 0;
+			}
+			String pathToTrack = gFSystem.rawPath(gPlayProperties.playlist->at(gPlayProperties.currentTrackNumber));
+			audioReturnCode = audio->connecttoFS(gFSystem, pathToTrack.c_str(), fileStartTime);
+			if (!audioReturnCode) { // most likely cause: file/folder removed since playlist generation
 				Log_Printf(LOGLEVEL_ERROR, dirOrFileDoesNotExist, gPlayProperties.playlist->at(gPlayProperties.currentTrackNumber));
-				gPlayProperties.trackFinished = true;
-				return;
-			} else {
-				int32_t fileStartTime = -1;
-				AudioPlayer_resumeSeekPendingSecs = 0; // default: no deferred seek for this track
-				if (gPlayProperties.startAtFilePos > 0) {
-					fileStartTime = gPlayProperties.startAtFilePos;
-					// Also arm a deferred seek: ESP32-audioI2S only honors this connecttoFS() start
-					// position for files whose Xing/VBR header sets m_nominal_bitrate. Headerless CBR
-					// audiobooks never get seeked here and restart from 0, so we re-seek ourselves once
-					// the measured bitrate is known (see AudioPlayer_Loop). Harmless for VBR (skipped).
-					AudioPlayer_resumeSeekPendingSecs = gPlayProperties.startAtFilePos;
-					Log_Printf(LOGLEVEL_NOTICE, trackStartatPos, gPlayProperties.startAtFilePos);
-					gPlayProperties.startAtFilePos = 0;
-				}
-				String pathToTrack = gFSystem.rawPath(gPlayProperties.playlist->at(gPlayProperties.currentTrackNumber));
-				audioReturnCode
-					= audio->connecttoFS(gFSystem, pathToTrack.c_str(), fileStartTime);
-				// consider track as finished, when audio lib call was not successful
 			}
 		}
 
@@ -1320,6 +1324,10 @@ void AudioPlayer_Loop() {
 			if (gPlayProperties.isWebstream && !Wlan_IsConnected()) {
 				AudioPlayer_RememberRfidForWifiRetry(gPlayProperties.playRfidTag);
 			}
+			if (deferAudiobookPositionSave) { // connect failed, flush the deferred save so the finished track is not replayed
+				AudioPlayer_NvsRfidWriteWrapper(gPlayProperties.playRfidTag, 0, gPlayProperties.playMode, gPlayProperties.currentTrackNumber);
+			}
+			AudioPlayer_AudiobookTrackEofTimestamp = 0;
 			gPlayProperties.trackFinished = true;
 			return;
 		} else {
