@@ -2886,7 +2886,18 @@ static void handleDeleteRFIDRequest(AsyncWebServerRequest *request) {
 		// failure, orphaning the local media/manifest files forever.
 		const String nvsValue = gPrefsRfid.getString(tagId.c_str(), "");
 		const bool isMediaHubCard = nvsValue.startsWith(String(stringDelimiter) + MediaHub_PathPrefix);
-		const bool mediaHubCleanupOk = !isMediaHubCard || MediaHub_DeleteCard(tagId.c_str());
+		// The NVS path field (after the leading delimiter) carries the hub
+		// address; with visible storage the wipe needs it to locate the
+		// hub-keyed manifest cache (see MediaHub_DeleteCard()).
+		String mediaHubPath;
+		if (isMediaHubCard) {
+			mediaHubPath = nvsValue.substring(strlen(stringDelimiter));
+			const int end = mediaHubPath.indexOf(stringDelimiter[0]);
+			if (end >= 0) {
+				mediaHubPath = mediaHubPath.substring(0, end);
+			}
+		}
+		const bool mediaHubCleanupOk = !isMediaHubCard || MediaHub_DeleteCard(tagId.c_str(), mediaHubPath.c_str());
 
 		if (mediaHubCleanupOk && gPrefsRfid.remove(tagId.c_str())) {
 			Rfid_ResetLastTag(); // The tag means nothing now: make sure re-applying it is not deduped away

@@ -1411,32 +1411,57 @@ void MediaHub_HandleCardTapped(const char *cardId, const char *path, uint32_t la
 	}
 }
 
+// Extracts the hub address from an NVS path field ("mediahub://<host:port>").
+// Returns an empty string for anything else, which keeps the legacy
+// (non-visible-storage) flat paths below.
+static String MediaHub_HostPortFromPath(const char *path) {
+	if (!MediaHub_IsMediaHubPath(path)) {
+		return "";
+	}
+	return String(path).substring(strlen(MediaHub_PathPrefix));
+}
+
 // Removes everything MediaHub keeps locally for one card: manifest cache,
 // stale marker, and downloaded media. Shared by MediaHub_ForceRefresh() (the
 // card comes back on the next tap) and MediaHub_DeleteCard() (it doesn't).
-static bool MediaHub_WipeCard(const char *cardId) {
-	gFSystem.remove(MediaHub_ManifestCachePath(cardId));
-	MediaHub_ClearStale(cardId);
-	File mediaDir = gFSystem.open(MediaHub_MediaDir(cardId));
-	if (!mediaDir || !mediaDir.isDirectory()) {
-		return true; // nothing to wipe
+// With visible storage the manifest cache lives under a hub-keyed directory
+// and the media under /MediaHub/<hub>, so the wipe needs the card's hub
+// address to find its own files. Visible /MediaHub content is deliberately
+// never deleted (same policy as the maintenance cleanup): only the per-card
+// manifest cache and stale marker go, the next tap re-syncs the rest.
+static bool MediaHub_WipeCard(const char *cardId, const char *path) {
+	const String hostPort = MediaHub_HostPortFromPath(path);
+	if (!gFSystem.remove(MediaHub_ManifestCachePath(cardId, hostPort))) {
+		// A non-existent cache file is fine; only a failed removal of an
+		// existing one is an error worth reporting.
+		if (gFSystem.exists(MediaHub_ManifestCachePath(cardId, hostPort))) {
+			return false;
+		}
 	}
-	return MediaHub_DeleteDirRecursive(mediaDir);
+	MediaHub_ClearStale(cardId, hostPort);
+	if (!MediaHub_UseVisibleStorage()) {
+		File mediaDir = gFSystem.open(MediaHub_MediaDir(cardId));
+		if (!mediaDir || !mediaDir.isDirectory()) {
+			return true; // nothing to wipe
+		}
+		return MediaHub_DeleteDirRecursive(mediaDir);
+	}
+	return true;
 }
 
 // Escape-hatch (concept §9/#7): discards the local cache for one card so the
 // next tap re-fetches the manifest and re-downloads everything from scratch.
 // Not wired to a trigger yet (Admin-Karte / Hub-Button lands in a later
 // phase alongside the "stale" mechanism it shares its machinery with).
-bool MediaHub_ForceRefresh(const char *cardId) {
-	return MediaHub_WipeCard(cardId);
+bool MediaHub_ForceRefresh(const char *cardId, const char *path) {
+	return MediaHub_WipeCard(cardId, path);
 }
 
 // REST-cascade target for DELETE /rfid?id=<cardId> (concept §13.1): called by
 // Web.cpp's handleDeleteRFIDRequest() for MediaHub-managed cards, in addition
 // to (not instead of) removing the NVS entry itself.
-bool MediaHub_DeleteCard(const char *cardId) {
-	return MediaHub_WipeCard(cardId);
+bool MediaHub_DeleteCard(const char *cardId, const char *path) {
+	return MediaHub_WipeCard(cardId, path);
 }
 
 // Same escape-hatch for every MediaHub-managed card at once ("für alle",

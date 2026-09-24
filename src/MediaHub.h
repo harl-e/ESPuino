@@ -67,7 +67,10 @@ bool MediaHub_CleanupOrphanedHidden();
 // Discards the local manifest cache + downloaded media for one card, or for
 // every MediaHub-managed card, forcing a full re-fetch/re-download on the
 // next tap (concept §9). Returns false if any part of the wipe failed.
-bool MediaHub_ForceRefresh(const char *cardId);
+// `path` is the card's NVS path field ("mediahub://<host:port>") when known;
+// with visible storage the manifest cache is hub-keyed, so the wipe can
+// only find the right files with it.
+bool MediaHub_ForceRefresh(const char *cardId, const char *path = nullptr);
 bool MediaHub_ForceRefreshAll();
 
 // Synchronizes all cached MediaHub manifests explicitly. This is independent
@@ -76,8 +79,8 @@ void MediaHub_SyncLocalManifests();
 
 // Same wipe as MediaHub_ForceRefresh(), but the card isn't coming back: for
 // the DELETE /rfid cascade (concept §13.1), called in addition to removing
-// the NVS entry. Returns false if any part of the wipe failed.
-bool MediaHub_DeleteCard(const char *cardId);
+// the NVS entry. `path` is the card's NVS path field, see above.
+bool MediaHub_DeleteCard(const char *cardId, const char *path = nullptr);
 
 // Registered media servers (concept §5.1): a small device-local list of
 // known hubs (display name + "host:port" + http/https), purely enrollment
