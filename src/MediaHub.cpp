@@ -52,14 +52,16 @@ static constexpr size_t MediaHub_DownloadBufferSize = 16384;
 
 // Set for the duration of an actual file download (concept §14/#16): a card
 // tapped while this is true gets a "busy" error instead of being processed.
-static volatile bool MediaHub_DownloadBusy = false;
+// Atomic: the check-then-act gap of a plain volatile flag let the web task's
+// cleanup race a concurrent card tap (TOCTOU) across cores.
+static std::atomic<bool> MediaHub_DownloadBusy {false};
 // Explicit sync has short non-download phases as well.  Maintenance must not
 // race its manifest writes, so it has a separate, equally small busy marker.
-static volatile bool MediaHub_SyncBusy = false;
+static std::atomic<bool> MediaHub_SyncBusy {false};
 
 struct MediaHub_BusyGuard {
 	MediaHub_BusyGuard() {
-		MediaHub_DownloadBusy = true;
+		MediaHub_DownloadBusy.store(true, std::memory_order_relaxed);
 		// Full WiFi power for the duration of the download - same win the
 		// upload path gets from System_PauseTasksDuringUpload(). Deliberately
 		// not reusing that function: it also suspends Led_Task and the RFID
@@ -68,7 +70,7 @@ struct MediaHub_BusyGuard {
 		Wlan_SetPowerSave(false);
 	}
 	~MediaHub_BusyGuard() {
-		MediaHub_DownloadBusy = false;
+		MediaHub_DownloadBusy.store(false, std::memory_order_relaxed);
 		Wlan_SetPowerSave(true);
 		Led_SetDownloadProgress(false);
 	}
@@ -504,8 +506,8 @@ enum MediaHub_DownloadChunkHistogramBucket : uint8_t {
 };
 
 struct MediaHub_SyncBusyGuard {
-	MediaHub_SyncBusyGuard() { MediaHub_SyncBusy = true; }
-	~MediaHub_SyncBusyGuard() { MediaHub_SyncBusy = false; }
+	MediaHub_SyncBusyGuard() { MediaHub_SyncBusy.store(true, std::memory_order_relaxed); }
+	~MediaHub_SyncBusyGuard() { MediaHub_SyncBusy.store(false, std::memory_order_relaxed); }
 };
 
 // Per-file diagnostics only. The producer owns HTTP/hash fields and the
@@ -1273,7 +1275,7 @@ String MediaHub_GetEspId() {
 // Dispatch entry point - see MediaHub.h for the contract. Order: local-cache
 // fast path, then stale re-sync, then a live manifest fetch.
 void MediaHub_HandleCardTapped(const char *cardId, const char *path, uint32_t lastPlayPos, uint16_t trackLastPlayed) {
-	if (MediaHub_DownloadBusy) {
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed)) {
 		Log_Println(mediaHubBusy, LOGLEVEL_NOTICE);
 		System_IndicateError();
 		return;
@@ -1611,7 +1613,7 @@ static void MediaHub_SendCardSeen(const String &hostPort, const char *cardId) {
 }
 
 static bool MediaHub_SyncAutoCard(const char *cardId, const String &hostPort) {
-	if (MediaHub_DownloadBusy) {
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed)) {
 		Log_Println(mediaHubBusy, LOGLEVEL_NOTICE);
 		System_IndicateError();
 		return false;
@@ -1784,7 +1786,7 @@ static bool MediaHub_ReadManifestCardId(const String &manifestPath, String &card
 }
 
 bool MediaHub_CleanupAllHidden() {
-	if (MediaHub_DownloadBusy || MediaHub_SyncBusy) {
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed) || MediaHub_SyncBusy.load(std::memory_order_relaxed)) {
 		Log_Println("MediaHub cleanup: refused while synchronization is active", LOGLEVEL_NOTICE);
 		return false;
 	}
@@ -1798,7 +1800,7 @@ bool MediaHub_CleanupAllHidden() {
 }
 
 bool MediaHub_CleanupOrphanedHidden() {
-	if (MediaHub_DownloadBusy || MediaHub_SyncBusy) {
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed) || MediaHub_SyncBusy.load(std::memory_order_relaxed)) {
 		Log_Println("MediaHub cleanup: refused while synchronization is active", LOGLEVEL_NOTICE);
 		return false;
 	}
@@ -2060,7 +2062,7 @@ static bool MediaHub_SyncCachedManifest(const String &manifestPath, uint16_t &do
 }
 
 void MediaHub_SyncLocalManifests() {
-	if (MediaHub_DownloadBusy || MediaHub_SyncBusy) {
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed) || MediaHub_SyncBusy.load(std::memory_order_relaxed)) {
 		Log_Println(mediaHubBusy, LOGLEVEL_NOTICE);
 		System_IndicateError();
 		return;
