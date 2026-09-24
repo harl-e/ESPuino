@@ -1638,6 +1638,7 @@ bool AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 	if (!list->size()) {
 		if (_playMode == TIME_RELEASE) {
 			Log_Println("TIME_RELEASE: no audio files in directory", LOGLEVEL_NOTICE);
+			gPlayProperties.playMode = NO_PLAYLIST;
 			freePlaylist(list);
 			return false;
 		}
@@ -1739,6 +1740,7 @@ bool AudioPlayer_SetPlaylist(const char *_itemToPlay, const uint32_t _lastPlayPo
 			const int32_t maxTrack = TimeRelease_GetMaxTrack(*timeRelease, list->size());
 			if (maxTrack < 0) {
 				Log_Println("TIME_RELEASE: content not released yet", LOGLEVEL_NOTICE);
+				gPlayProperties.playMode = NO_PLAYLIST;
 				freePlaylist(list);
 				return false;
 			}
