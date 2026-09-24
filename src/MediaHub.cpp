@@ -816,8 +816,16 @@ static bool MediaHub_DownloadAndVerifyFile(const String &fileUrl, const String &
 	}
 	xTaskNotify(MediaHub_DownloadWriterTaskHandle, (transferError || restartRequested) ? 2u : 1u, eSetValueWithOverwrite);
 	if (xSemaphoreTake(MediaHub_DownloadWriterDone, pdMS_TO_TICKS(30000)) != pdTRUE) {
-		// writer task got stuck somehow - don't hang forever, just report failure
+		// Writer task got stuck somehow - don't hang forever, just report
+		// failure. The buffers must NOT be freed here: the writer may still be
+		// inside file.write() using them, and freeing underneath it would
+		// corrupt the heap. Keep them allocated; the next transfer attempt
+		// reuses them via MediaHub_EnsureDownloadBuffersAllocated().
 		transferError = true;
+		mbedtls_sha256_free(&shaCtx);
+		http.end();
+		gFSystem.remove(tmpPath);
+		return false;
 	}
 	if (MediaHub_DownloadWriterError) {
 		transferError = true;
