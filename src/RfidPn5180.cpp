@@ -73,6 +73,9 @@ std::atomic<uint32_t> slixPrivacyPassword {PackSlixPrivacyPassword(SLIX_PRIVACY_
 
 // Stored as major << 8 | minor. This value is RAM-only and is never written to NVS.
 std::atomic<uint16_t> pn5180FirmwareVersion {0};
+// Set at boot when LPCD is enabled but the PN5180 firmware (< 4.0) cannot support it; read by the
+// web UI to warn before the user relies on a feature that would silently not arm at shutdown.
+std::atomic<bool> pn5180LpcdUnsupportedByFirmware {false};
 } // namespace
 
 SlixPrivacyPassword RfidPn5180_GetSlixPrivacyPassword(void) {
@@ -91,6 +94,10 @@ bool RfidPn5180_GetFirmwareVersion(uint8_t &major, uint8_t &minor) {
 	major = static_cast<uint8_t>(version >> 8);
 	minor = static_cast<uint8_t>(version & 0xFF);
 	return true;
+}
+
+bool RfidPn5180_IsLpcdUnsupportedByFirmware(void) {
+	return pn5180LpcdUnsupportedByFirmware.load(std::memory_order_relaxed);
 }
 
 #if defined(RFID_READER_TYPE_RUNTIME)
@@ -305,6 +312,12 @@ void RfidPn5180_Task(void *parameter) {
 			if (nfc14443.readEEprom(FIRMWARE_VERSION, firmwareVersion, sizeof(firmwareVersion))) {
 				pn5180FirmwareVersion.store((static_cast<uint16_t>(firmwareVersion[1]) << 8) | firmwareVersion[0], std::memory_order_relaxed);
 				Log_Printf(LOGLEVEL_DEBUG, "PN5180 firmware version=%d.%d", firmwareVersion[1], firmwareVersion[0]);
+				// Surface an LPCD/firmware mismatch right at boot, not only in the shutdown path where
+				// Rfid_EnableLpcd() would silently refuse to arm LPCD. rfidStatus exposes it to the web UI.
+				if (Rfid_Pn5180LpcdEnabled() && firmwareVersion[1] < 4) {
+					Log_Println("This PN5180 firmware does not work with LPCD! use firmware >= 4.0", LOGLEVEL_ERROR);
+					pn5180LpcdUnsupportedByFirmware.store(true, std::memory_order_relaxed);
+				}
 			}
 
 			// activate RF field

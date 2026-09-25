@@ -559,7 +559,8 @@
 			"pn5180DebounceExp": "Time in milliseconds a card must go undetected before it's considered removed. Prevents brief read dropouts (e.g. with a larger gap between card and reader) from being mistaken for card removal. A restart is required for a change to take effect. Default is 500ms.",
 			"slixPrivacyPassword": "ICODE-SLIX2 privacy password",
 			"slixPrivacyPasswordExp": "Four-byte password used to disable privacy mode on protected ICODE-SLIX2 tags. Only hexadecimal values from 00 to FF are accepted.",
-			"pn5180Firmware": "PN5180 firmware readout"
+			"pn5180Firmware": "PN5180 firmware readout",
+			"pn5180LpcdFirmwareWarning": "LPCD is enabled but this PN5180 firmware is older than 4.0. LPCD will not be armed on shutdown; the device will only wake via button. Update the PN5180 firmware to 4.0 or newer."
 		},
 		"options": {
 			"title": "Options",

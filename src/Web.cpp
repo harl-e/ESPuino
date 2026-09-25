@@ -1298,6 +1298,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		} else {
 			rfidStatusObj["pn5180Firmware"].set("");
 		}
+		rfidStatusObj["pn5180LpcdUnsupported"].set(RfidPn5180_IsLpcdUnsupportedByFirmware());
 	}
 	if ((section == "") || (section == "equalizer")) {
 		// equalizer settings
