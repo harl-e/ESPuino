@@ -556,8 +556,18 @@ void AudioPlayer_Exit(void) {
 		// Call the loop explicitely to make sure that PAUSE is set (because this saves the current playpos)
 		AudioPlayer_Loop();
 	}
-	delete audio;
-	audio = nullptr;
+	// Do NOT `delete audio` here: AudioPlayer_Exit() runs only from System_PreparePowerDown(),
+	// i.e. right before esp_deep_sleep_start() or ESP.restart() - the heap is wiped either way,
+	// so freeing is pointless. Worse, delete -> ~Audio() -> stopAudioTask() force-vTaskDelete()s
+	// the decode task on an unchecked 0.3s mutex timeout and tears down the I2S channel while
+	// the task may still be inside i2s_channel_write() (which runs outside mutex_audioTask),
+	// so with playback active it can wedge the chip mid-shutdown: the box looks off (LEDs dark,
+	// amp muted) but never reaches deep sleep, leaving it impossible to wake up. stopSong() is
+	// the synchronized, proven-safe stop used on every track change: it mutes, ends decoding
+	// and closes the file cleanly. Same abandon-don't-delete pattern as Bluetooth_Exit().
+	if (audio) {
+		audio->stopSong();
+	}
 }
 
 static uint32_t lastPlayingTimestamp = 0;
