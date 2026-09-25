@@ -111,6 +111,11 @@ static bool Rfid_Pn5180LpcdEnabled(void) {
 bool Rfid_EnableLpcd(void); // Returns true only if LPCD was fully armed (holds + ext1 wakeup included)
 void RfidPn5180_WakeupCheck(void);
 bool enabledLpcdShutdown = false; // Indicates if LPCD should be activated as part of the shutdown-process
+// Set by RfidPn5180_WakeupCheck() when an LPCD wakeup was caused by a known card that has already
+// been queued for playback; RfidPn5180_Task() primes its same-card state from it so the resting
+// card is not queued a second time (which would restart playback from scratch).
+static bool lpcdWakeupCardPrimed = false;
+static byte lpcdWakeupCardId[cardIdSize] = {0};
 
 void Rfid_SetLpcdShutdownStatus(bool lpcdStatus) {
 	enabledLpcdShutdown = lpcdStatus;
@@ -265,6 +270,18 @@ void RfidPn5180_Task(void *parameter) {
 	bool silentHealActive = false; // a full re-init sweep is in progress to un-wedge a still-present card
 	uint32_t silentHealStartMs = 0; // millis() when the current heal started (for the recover/give-up logs)
 	uint8_t silentHealGiveUpState = 0; // the wedged protocol's read state; the sweep concludes when it is re-reached
+
+	// An LPCD wakeup with a known card was already queued by RfidPn5180_WakeupCheck(). Prime the
+	// same-card state so the first poll takes the fast path (no duplicate queue-send) while
+	// remove/reapply still runs through the normal resume logic. cardApplied*-priming makes a
+	// card removed during boot correctly pause playback (pauseIfRfidRemoved) on the first miss.
+	if (lpcdWakeupCardPrimed) {
+		lpcdWakeupCardPrimed = false;
+		memcpy(lastValidcardId, lpcdWakeupCardId, cardIdSize);
+		memcpy(lastCardId, lpcdWakeupCardId, cardIdSize);
+		cardAppliedCurrentRun = true;
+		cardAppliedLastRun = true;
+	}
 
 	// wait until queues are created
 	while (gRfidCardQueue == NULL) {
@@ -688,6 +705,7 @@ void RfidPn5180_WakeupCheck(void) {
 	}
 
 	// check for card id in NVS
+	char tagId[cardIdStringSize] = "";
 	if (isCardPresent) {
 		// Only the first cardIdSize bytes of the UID are used, matching the same ID scheme used for
 		// NVS lookups everywhere else (see RfidPn5180_Task below, memcpy(cardId, uid, cardIdSize)).
@@ -695,7 +713,6 @@ void RfidPn5180_WakeupCheck(void) {
 		// stack buffer (cardIdStringSize is sized for exactly cardIdSize formatted bytes): once the
 		// write position exceeded the buffer, "cardIdStringSize - pos" (both size_t/unsigned) wrapped
 		// to a huge value, so snprintf kept writing well past the end of tagId.
-		char tagId[cardIdStringSize];
 		size_t pos = 0;
 		for (size_t i = 0; i < cardIdSize; i++) {
 			const int written = snprintf(tagId + pos, cardIdStringSize - pos, "%03d", uid[i]);
@@ -740,5 +757,17 @@ void RfidPn5180_WakeupCheck(void) {
 		}
 	}
 	nfc14443.end();
+
+	// Known card present: queue it right away instead of waiting for the scanning task to boot,
+	// poll, debounce and re-read it. This cuts the wakeup-to-playback latency by roughly the
+	// task startup + first-poll + debounce window. The queue is consumed by
+	// Rfid_PreferenceLookupHandler() as soon as setup() finishes.
+	if (cardInNVS) {
+		xQueueSend(gRfidCardQueue, tagId, 0);
+		Rfid_SetCardPresent(true);
+		memcpy(lpcdWakeupCardId, uid, cardIdSize);
+		lpcdWakeupCardPrimed = true;
+		Log_Println("LPCD wakeup with known card: queued for playback", LOGLEVEL_NOTICE);
+	}
 }
 #endif
