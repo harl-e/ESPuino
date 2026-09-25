@@ -497,9 +497,6 @@ void RfidPn5180_Task(void *parameter) {
 		}
 
 		if (gPlayProperties.pauseIfRfidRemoved) {
-			// Only pause if there's actually something to pause -- otherwise removing a card after the
-			// playlist has already finished naturally queues a PAUSEPLAY that AudioPlayer_Cyclic() then
-			// rejects with "no playmode change while idle", which is a confusing error for a normal action.
 			if (!cardAppliedCurrentRun && cardAppliedLastRun) {
 				Rfid_SetCardPresent(false);
 				// Only pause if there's actually something to pause -- otherwise removing a card after the
@@ -714,6 +711,9 @@ void RfidPn5180_WakeupCheck(void) {
 	static PN5180ISO14443 nfc14443(RFID_CS, RFID_BUSY, RFID_RST);
 	nfc14443.begin();
 	nfc14443.reset();
+	// Same reduced timeout as the polling task: on an SPI glitch the wake-to-sleep path should
+	// not stall for the library default of 500ms per BUSY-pin wait before re-arming LPCD.
+	nfc14443.commandTimeout = 100;
 	// enable RF field
 	nfc14443.setupRF();
 
@@ -724,6 +724,7 @@ void RfidPn5180_WakeupCheck(void) {
 	if (!isCardPresent) {
 		static PN5180ISO15693 nfc15693(RFID_CS, RFID_BUSY, RFID_RST);
 		nfc15693.begin();
+		nfc15693.commandTimeout = 100;
 		nfc15693.setupRF();
 		// do not handle encrypted cards in any way here
 		isCardPresent = nfc15693.getInventory(uid) == ISO15693_EC_OK;
