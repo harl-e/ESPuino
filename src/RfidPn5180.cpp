@@ -315,6 +315,23 @@ void RfidPn5180_Task(void *parameter) {
 		bool cardReceived = false;
 		bool sameCardReapplied = false;
 
+		// Safety net for the silent-heal sweep below: a full cross-protocol re-init sweep normally
+		// completes within a few hundred ms. If the reader is persistently wedged the sweep's
+		// give-up condition may never trigger, leaving the state machine walking heal states while
+		// removal stays suppressed indefinitely. After this timeout the heal is abandoned and
+		// removal is declared, so pauseIfRfidRemoved can act and the next good read starts fresh.
+		if (silentHealActive && (millis() - silentHealStartMs >= 10000u)) {
+				Log_Printf(LOGLEVEL_DEBUG, "PN5180 silent heal timed out after %u ms, declaring removal", millis() - silentHealStartMs);
+				silentHealActive = false;
+				lastTimeDetected14443 = 0;
+				lastTimeDetected15693 = 0;
+				cardAppliedCurrentRun = false;
+				for (uint8_t i = 0; i < cardIdSize; i++) {
+					lastCardId[i] = 0;
+				}
+				stateMachine = RFID_PN5180_NFC14443_STATE_RESET;
+			}
+
 		if (RFID_PN5180_STATE_INIT == stateMachine) {
 			nfc14443.begin();
 			nfc14443.reset();
