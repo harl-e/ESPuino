@@ -560,7 +560,8 @@
 			"pn5180DebounceExp": "Durée en millisecondes pendant laquelle une carte doit rester non détectée avant d'être considérée comme retirée. Évite que de brèves pertes de lecture (par ex. avec un écart plus important entre la carte et le lecteur) soient interprétées à tort comme un retrait de carte. Un redémarrage est nécessaire pour qu'une modification prenne effet. La valeur par défaut est 500ms.",
 			"slixPrivacyPassword": "Mot de passe de confidentialité ICODE-SLIX2",
 			"slixPrivacyPasswordExp": "Mot de passe de quatre octets utilisé pour désactiver le mode confidentialité des tags ICODE-SLIX2 protégés. Seules les valeurs hexadécimales de 00 à FF sont acceptées.",
-			"pn5180Firmware": "Firmware PN5180 lue"
+			"pn5180Firmware": "Firmware PN5180 lue",
+			"pn5180LpcdFirmwareWarning": "LPCD est activé, mais ce firmware PN5180 est antérieur à 4.0. LPCD ne sera pas armé à l'arrêt ; l'appareil ne pourra être réveillé que par bouton. Mettez à jour le firmware PN5180 en 4.0 ou plus récent."
 		},
 		"options": {
 			"title": "Options",

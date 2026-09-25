@@ -1750,6 +1750,7 @@
 									<div class="col-sm-4 col-form-label" data-i18n="general.rfid.pn5180Firmware"></div>
 									<div class="col-sm-8">
 										<div class="form-control-plaintext" id="pn5180FirmwareValue">—</div>
+										<div class="text-danger small d-none" id="pn5180LpcdFirmwareWarning" data-i18n="general.rfid.pn5180LpcdFirmwareWarning"></div>
 									</div>
 								</div>
 								<div class="row mb-2 align-items-center">
@@ -4495,14 +4496,18 @@
 
 		async function updatePn5180FirmwareInfo() {
 			const firmwareValue = $('#pn5180FirmwareValue');
+			const lpcdWarning = $('#pn5180LpcdFirmwareWarning');
 			try {
 				const response = await fetch("http://" + host + "/settings?section=rfidstatus");
 				if (!response.ok) throw new Error(response.statusText);
 				const data = await response.json();
 				const firmware = data.rfidStatus && data.rfidStatus.pn5180Firmware;
 				firmwareValue.text(firmware || '—');
+				const lpcdUnsupported = !!(data.rfidStatus && data.rfidStatus.pn5180LpcdUnsupported);
+				lpcdWarning.toggleClass('d-none', !lpcdUnsupported);
 			} catch (err) {
 				firmwareValue.text('—');
+				lpcdWarning.addClass('d-none');
 			}
 		}
 

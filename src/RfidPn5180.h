@@ -20,3 +20,7 @@ void RfidPn5180_SetSlixPrivacyPassword(const SlixPrivacyPassword &password);
 // Returns the PN5180 firmware version cached in RAM during PN5180 initialization.
 // No hardware access is performed here; false means no version has been read yet.
 bool RfidPn5180_GetFirmwareVersion(uint8_t &major, uint8_t &minor);
+
+// True when LPCD is enabled but the detected PN5180 firmware (< 4.0) cannot support it.
+// Set once during PN5180 task init; no hardware access is performed here.
+bool RfidPn5180_IsLpcdUnsupportedByFirmware(void);

@@ -73,6 +73,9 @@ std::atomic<uint32_t> slixPrivacyPassword {PackSlixPrivacyPassword(SLIX_PRIVACY_
 
 // Stored as major << 8 | minor. This value is RAM-only and is never written to NVS.
 std::atomic<uint16_t> pn5180FirmwareVersion {0};
+// Set at boot when LPCD is enabled but the PN5180 firmware (< 4.0) cannot support it; read by the
+// web UI to warn before the user relies on a feature that would silently not arm at shutdown.
+std::atomic<bool> pn5180LpcdUnsupportedByFirmware {false};
 } // namespace
 
 SlixPrivacyPassword RfidPn5180_GetSlixPrivacyPassword(void) {
@@ -93,6 +96,10 @@ bool RfidPn5180_GetFirmwareVersion(uint8_t &major, uint8_t &minor) {
 	return true;
 }
 
+bool RfidPn5180_IsLpcdUnsupportedByFirmware(void) {
+	return pn5180LpcdUnsupportedByFirmware.load(std::memory_order_relaxed);
+}
+
 #if defined(RFID_READER_TYPE_RUNTIME)
 static void RfidPn5180_Task(void *parameter);
 uint8_t stateMachine = RFID_PN5180_STATE_INIT;
@@ -101,9 +108,14 @@ static bool Rfid_Pn5180LpcdEnabled(void) {
 	return gPrefsRfid.getBool("pn5180Lpcd", false);
 }
 
-void Rfid_EnableLpcd(void);
+bool Rfid_EnableLpcd(void); // Returns true only if LPCD was fully armed (holds + ext1 wakeup included)
 void RfidPn5180_WakeupCheck(void);
 bool enabledLpcdShutdown = false; // Indicates if LPCD should be activated as part of the shutdown-process
+// Set by RfidPn5180_WakeupCheck() when an LPCD wakeup was caused by a known card that has already
+// been queued for playback; RfidPn5180_Task() primes its same-card state from it so the resting
+// card is not queued a second time (which would restart playback from scratch).
+static bool lpcdWakeupCardPrimed = false;
+static byte lpcdWakeupCardId[cardIdSize] = {0};
 
 void Rfid_SetLpcdShutdownStatus(bool lpcdStatus) {
 	enabledLpcdShutdown = lpcdStatus;
@@ -259,6 +271,18 @@ void RfidPn5180_Task(void *parameter) {
 	uint32_t silentHealStartMs = 0; // millis() when the current heal started (for the recover/give-up logs)
 	uint8_t silentHealGiveUpState = 0; // the wedged protocol's read state; the sweep concludes when it is re-reached
 
+	// An LPCD wakeup with a known card was already queued by RfidPn5180_WakeupCheck(). Prime the
+	// same-card state so the first poll takes the fast path (no duplicate queue-send) while
+	// remove/reapply still runs through the normal resume logic. cardApplied*-priming makes a
+	// card removed during boot correctly pause playback (pauseIfRfidRemoved) on the first miss.
+	if (lpcdWakeupCardPrimed) {
+		lpcdWakeupCardPrimed = false;
+		memcpy(lastValidcardId, lpcdWakeupCardId, cardIdSize);
+		memcpy(lastCardId, lpcdWakeupCardId, cardIdSize);
+		cardAppliedCurrentRun = true;
+		cardAppliedLastRun = true;
+	}
+
 	// wait until queues are created
 	while (gRfidCardQueue == NULL) {
 		Log_Println(waitingForTaskQueues, LOGLEVEL_DEBUG);
@@ -273,15 +297,40 @@ void RfidPn5180_Task(void *parameter) {
 			memset(lastValidcardId, 0, sizeof(lastValidcardId));
 		}
 		if (Rfid_Pn5180LpcdEnabled() && Rfid_GetLpcdShutdownStatus()) {
-			Rfid_EnableLpcd();
+			const bool lpcdArmed = Rfid_EnableLpcd();
 			Rfid_SetLpcdShutdownStatus(false); // give feedback that execution is complete
-			while (true) {
-				vTaskDelay(portTICK_PERIOD_MS * 100u); // there's no way back if shutdown was initiated
+			if (lpcdArmed) {
+				while (true) {
+					vTaskDelay(portTICK_PERIOD_MS * 100u); // there's no way back if shutdown was initiated
+				}
 			}
+			// LPCD could not be armed (e.g. firmware < 4.0, SPI trouble, switchToLPCD failed): the
+			// shutdown must still complete, so end this task instead of sleeping forever. Deep-sleep
+			// wakeup then falls back to the button (ext0) configured in Button_Init().
+			Log_Println("PN5180 LPCD not armed, terminating rfid task", LOGLEVEL_ERROR);
+			rfidTaskHandle = NULL;
+			vTaskDelete(NULL);
 		}
 		String cardIdString;
 		bool cardReceived = false;
 		bool sameCardReapplied = false;
+
+		// Safety net for the silent-heal sweep below: a full cross-protocol re-init sweep normally
+		// completes within a few hundred ms. If the reader is persistently wedged the sweep's
+		// give-up condition may never trigger, leaving the state machine walking heal states while
+		// removal stays suppressed indefinitely. After this timeout the heal is abandoned and
+		// removal is declared, so pauseIfRfidRemoved can act and the next good read starts fresh.
+		if (silentHealActive && (millis() - silentHealStartMs >= 10000u)) {
+				Log_Printf(LOGLEVEL_DEBUG, "PN5180 silent heal timed out after %u ms, declaring removal", millis() - silentHealStartMs);
+				silentHealActive = false;
+				lastTimeDetected14443 = 0;
+				lastTimeDetected15693 = 0;
+				cardAppliedCurrentRun = false;
+				for (uint8_t i = 0; i < cardIdSize; i++) {
+					lastCardId[i] = 0;
+				}
+				stateMachine = RFID_PN5180_NFC14443_STATE_RESET;
+			}
 
 		if (RFID_PN5180_STATE_INIT == stateMachine) {
 			nfc14443.begin();
@@ -297,6 +346,12 @@ void RfidPn5180_Task(void *parameter) {
 			if (nfc14443.readEEprom(FIRMWARE_VERSION, firmwareVersion, sizeof(firmwareVersion))) {
 				pn5180FirmwareVersion.store((static_cast<uint16_t>(firmwareVersion[1]) << 8) | firmwareVersion[0], std::memory_order_relaxed);
 				Log_Printf(LOGLEVEL_DEBUG, "PN5180 firmware version=%d.%d", firmwareVersion[1], firmwareVersion[0]);
+				// Surface an LPCD/firmware mismatch right at boot, not only in the shutdown path where
+				// Rfid_EnableLpcd() would silently refuse to arm LPCD. rfidStatus exposes it to the web UI.
+				if (Rfid_Pn5180LpcdEnabled() && firmwareVersion[1] < 4) {
+					Log_Println("This PN5180 firmware does not work with LPCD! use firmware >= 4.0", LOGLEVEL_ERROR);
+					pn5180LpcdUnsupportedByFirmware.store(true, std::memory_order_relaxed);
+				}
 			}
 
 			// activate RF field
@@ -442,9 +497,6 @@ void RfidPn5180_Task(void *parameter) {
 		}
 
 		if (gPlayProperties.pauseIfRfidRemoved) {
-			// Only pause if there's actually something to pause -- otherwise removing a card after the
-			// playlist has already finished naturally queues a PAUSEPLAY that AudioPlayer_Cyclic() then
-			// rejects with "no playmode change while idle", which is a confusing error for a normal action.
 			if (!cardAppliedCurrentRun && cardAppliedLastRun) {
 				Rfid_SetCardPresent(false);
 				// Only pause if there's actually something to pause -- otherwise removing a card after the
@@ -553,7 +605,16 @@ void RfidPn5180_Exit(void) {
 	Log_Println("shutdown PN5180..", LOGLEVEL_NOTICE);
 	if (Rfid_Pn5180LpcdEnabled()) {
 		Rfid_SetLpcdShutdownStatus(true);
-		while (Rfid_GetLpcdShutdownStatus()) { // Make sure init of LPCD is complete!
+		// Make sure init of LPCD is complete, but never wedge the whole shutdown if the rfid task is
+		// unresponsive (suspended by an upload, SPI stuck, ...). Give up after a timeout and delete
+		// the task below; deep sleep then falls back to the button wakeup (ext0).
+		const uint32_t lpcdShutdownTimeoutMs = 5000;
+		const uint32_t lpcdShutdownStart = millis();
+		while (Rfid_GetLpcdShutdownStatus()) {
+			if (millis() - lpcdShutdownStart >= lpcdShutdownTimeoutMs) {
+				Log_Println("PN5180 LPCD setup not completed in time, continuing shutdown", LOGLEVEL_ERROR);
+				break;
+			}
 			vTaskDelay(portTICK_PERIOD_MS * 10u);
 		}
 	}
@@ -563,24 +624,37 @@ void RfidPn5180_Exit(void) {
 	}
 }
 
-// Handles activation of LPCD (while shutdown is in progress)
-void Rfid_EnableLpcd(void) {
+// LPCD polling interval in milliseconds. The PN5180 only accepts 0x0..0xA82 (max 2960 ms);
+// the counter is the LPCD wake-up period while no card is on the reader: shorter = faster card
+// detection in deep sleep but slightly higher average current. Configurable via the NVS key
+// "pn5180LpcdWakeup"; values outside the valid range fall back to the default (0x3FF).
+static uint16_t Rfid_Pn5180LpcdWakeupCounterMs(void) {
+	const uint16_t value = gPrefsRfid.getUShort("pn5180LpcdWakeup", 0x3FF);
+	return (value > 0xA82) ? 0x3FF : value;
+}
+
+// Handles activation of LPCD (while shutdown is in progress). Returns true only if LPCD was
+// fully armed, i.e. the PN5180 is in LPCD mode AND the deep-sleep wakeup + GPIO holds are set up.
+bool Rfid_EnableLpcd(void) {
 	if (!Rfid_Pn5180LpcdEnabled()) {
-		return;
+		return false;
 	}
 	static PN5180 nfc(RFID_CS, RFID_BUSY, RFID_RST);
 	nfc.begin();
 	nfc.reset();
-	// show PN5180 reader version
-	uint8_t firmwareVersion[2];
-	nfc.readEEprom(FIRMWARE_VERSION, firmwareVersion, sizeof(firmwareVersion));
+	// read PN5180 reader version; on failure the version check below must not run on garbage
+	uint8_t firmwareVersion[2] = {0, 0};
+	if (!nfc.readEEprom(FIRMWARE_VERSION, firmwareVersion, sizeof(firmwareVersion))) {
+		Log_Println("PN5180 firmware version not readable, LPCD not armed", LOGLEVEL_ERROR);
+		return false;
+	}
 	Log_Printf(LOGLEVEL_DEBUG, "PN5180 firmware version=%d.%d", firmwareVersion[1], firmwareVersion[0]);
 
 	// check firmware version: PN5180 firmware < 4.0 has several bugs preventing the LPCD mode
 	// you can flash latest firmware with this project: https://github.com/abidxraihan/PN5180_Updater_ESP32
 	if (firmwareVersion[1] < 4) {
 		Log_Println("This PN5180 firmware does not work with LPCD! use firmware >= 4.0", LOGLEVEL_ERROR);
-		return;
+		return false;
 	}
 	Log_Println("prepare low power card detection...", LOGLEVEL_NOTICE);
 	uint8_t irqConfig = 0b0000000; // Set IRQ active low + clear IRQ-register
@@ -589,25 +663,31 @@ void Rfid_EnableLpcd(void) {
 	nfc.readEEprom(IRQ_PIN_CONFIG, &irqConfig, 1);
 	Log_Printf("IRQ_PIN_CONFIG=0x%02X", irqConfig)
 	*/
-	nfc.prepareLPCD();
+	if (!nfc.prepareLPCD()) {
+		Log_Println("PN5180 prepareLPCD failed, LPCD not armed", LOGLEVEL_ERROR);
+		return false;
+	}
 	Log_Printf(LOGLEVEL_DEBUG, "PN5180 IRQ PIN (%d) state: %d", RFID_IRQ, Port_Read(RFID_IRQ));
 	// turn on LPCD
-	uint16_t wakeupCounterInMs = 0x3FF; //  must be in the range of 0x0 - 0xA82. max wake-up time is 2960 ms.
-	if (nfc.switchToLPCD(wakeupCounterInMs)) {
+	if (!nfc.switchToLPCD(Rfid_Pn5180LpcdWakeupCounterMs())) {
+		Log_Println("switchToLPCD failed, LPCD not armed", LOGLEVEL_ERROR);
+		return false;
+	}
+	{
 		Log_Println("switch to low power card detection: success", LOGLEVEL_NOTICE);
 	// configure wakeup pin for deep-sleep wake-up, use ext1. For a real GPIO only, not PE
 	#if (RFID_IRQ >= 0 && RFID_IRQ <= MAX_GPIO)
 		if (ESP_ERR_INVALID_ARG == esp_sleep_enable_ext1_wakeup((1ULL << (RFID_IRQ)), ESP_EXT1_WAKEUP_ALL_LOW)) {
 			Log_Printf(LOGLEVEL_ERROR, wrongWakeUpGpio, RFID_IRQ);
+			return false; // without a valid ext1 wakeup source the device would never wake on a card
 		}
 	#endif
 		// freeze pin states in deep sleep
 		gpio_hold_en(gpio_num_t(RFID_CS)); // CS/NSS
 		gpio_hold_en(gpio_num_t(RFID_RST)); // RST
 		gpio_deep_sleep_hold_en();
-	} else {
-		Log_Println("switchToLPCD failed", LOGLEVEL_ERROR);
 	}
+	return true;
 }
 
 // wake up from LPCD, check card is present in NVS
@@ -631,6 +711,9 @@ void RfidPn5180_WakeupCheck(void) {
 	static PN5180ISO14443 nfc14443(RFID_CS, RFID_BUSY, RFID_RST);
 	nfc14443.begin();
 	nfc14443.reset();
+	// Same reduced timeout as the polling task: on an SPI glitch the wake-to-sleep path should
+	// not stall for the library default of 500ms per BUSY-pin wait before re-arming LPCD.
+	nfc14443.commandTimeout = 100;
 	// enable RF field
 	nfc14443.setupRF();
 
@@ -641,12 +724,14 @@ void RfidPn5180_WakeupCheck(void) {
 	if (!isCardPresent) {
 		static PN5180ISO15693 nfc15693(RFID_CS, RFID_BUSY, RFID_RST);
 		nfc15693.begin();
+		nfc15693.commandTimeout = 100;
 		nfc15693.setupRF();
 		// do not handle encrypted cards in any way here
 		isCardPresent = nfc15693.getInventory(uid) == ISO15693_EC_OK;
 	}
 
 	// check for card id in NVS
+	char tagId[cardIdStringSize] = "";
 	if (isCardPresent) {
 		// Only the first cardIdSize bytes of the UID are used, matching the same ID scheme used for
 		// NVS lookups everywhere else (see RfidPn5180_Task below, memcpy(cardId, uid, cardIdSize)).
@@ -654,7 +739,6 @@ void RfidPn5180_WakeupCheck(void) {
 		// stack buffer (cardIdStringSize is sized for exactly cardIdSize formatted bytes): once the
 		// write position exceeded the buffer, "cardIdStringSize - pos" (both size_t/unsigned) wrapped
 		// to a huge value, so snprintf kept writing well past the end of tagId.
-		char tagId[cardIdStringSize];
 		size_t pos = 0;
 		for (size_t i = 0; i < cardIdSize; i++) {
 			const int written = snprintf(tagId + pos, cardIdStringSize - pos, "%03d", uid[i]);
@@ -674,8 +758,7 @@ void RfidPn5180_WakeupCheck(void) {
 	if (!cardInNVS) {
 		// no card found or card not in NVS, go back to deep sleep
 		nfc14443.reset();
-		uint16_t wakeupCounterInMs = 0x3FF; //  needs to be in the range of 0x0 - 0xA82. max wake-up time is 2960 ms.
-		if (nfc14443.switchToLPCD(wakeupCounterInMs)) {
+		if (nfc14443.switchToLPCD(Rfid_Pn5180LpcdWakeupCounterMs())) {
 			Log_Println(lowPowerCardSuccess, LOGLEVEL_INFO);
 
 	// configure wakeup pin for deep-sleep wake-up, use ext1
@@ -699,5 +782,17 @@ void RfidPn5180_WakeupCheck(void) {
 		}
 	}
 	nfc14443.end();
+
+	// Known card present: queue it right away instead of waiting for the scanning task to boot,
+	// poll, debounce and re-read it. This cuts the wakeup-to-playback latency by roughly the
+	// task startup + first-poll + debounce window. The queue is consumed by
+	// Rfid_PreferenceLookupHandler() as soon as setup() finishes.
+	if (cardInNVS) {
+		xQueueSend(gRfidCardQueue, tagId, 0);
+		Rfid_SetCardPresent(true);
+		memcpy(lpcdWakeupCardId, uid, cardIdSize);
+		lpcdWakeupCardPrimed = true;
+		Log_Println("LPCD wakeup with known card: queued for playback", LOGLEVEL_NOTICE);
+	}
 }
 #endif
