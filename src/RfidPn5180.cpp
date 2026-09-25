@@ -610,6 +610,15 @@ void RfidPn5180_Exit(void) {
 	}
 }
 
+// LPCD polling interval in milliseconds. The PN5180 only accepts 0x0..0xA82 (max 2960 ms);
+// the counter is the LPCD wake-up period while no card is on the reader: shorter = faster card
+// detection in deep sleep but slightly higher average current. Configurable via the NVS key
+// "pn5180LpcdWakeup"; values outside the valid range fall back to the default (0x3FF).
+static uint16_t Rfid_Pn5180LpcdWakeupCounterMs(void) {
+	const uint16_t value = gPrefsRfid.getUShort("pn5180LpcdWakeup", 0x3FF);
+	return (value > 0xA82) ? 0x3FF : value;
+}
+
 // Handles activation of LPCD (while shutdown is in progress). Returns true only if LPCD was
 // fully armed, i.e. the PN5180 is in LPCD mode AND the deep-sleep wakeup + GPIO holds are set up.
 bool Rfid_EnableLpcd(void) {
@@ -646,8 +655,7 @@ bool Rfid_EnableLpcd(void) {
 	}
 	Log_Printf(LOGLEVEL_DEBUG, "PN5180 IRQ PIN (%d) state: %d", RFID_IRQ, Port_Read(RFID_IRQ));
 	// turn on LPCD
-	uint16_t wakeupCounterInMs = 0x3FF; //  must be in the range of 0x0 - 0xA82. max wake-up time is 2960 ms.
-	if (!nfc.switchToLPCD(wakeupCounterInMs)) {
+	if (!nfc.switchToLPCD(Rfid_Pn5180LpcdWakeupCounterMs())) {
 		Log_Println("switchToLPCD failed, LPCD not armed", LOGLEVEL_ERROR);
 		return false;
 	}
@@ -732,8 +740,7 @@ void RfidPn5180_WakeupCheck(void) {
 	if (!cardInNVS) {
 		// no card found or card not in NVS, go back to deep sleep
 		nfc14443.reset();
-		uint16_t wakeupCounterInMs = 0x3FF; //  needs to be in the range of 0x0 - 0xA82. max wake-up time is 2960 ms.
-		if (nfc14443.switchToLPCD(wakeupCounterInMs)) {
+		if (nfc14443.switchToLPCD(Rfid_Pn5180LpcdWakeupCounterMs())) {
 			Log_Println(lowPowerCardSuccess, LOGLEVEL_INFO);
 
 	// configure wakeup pin for deep-sleep wake-up, use ext1
