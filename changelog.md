@@ -2,6 +2,8 @@
 
 ## DEV-branch
 
+* 25.09.2026: Fix the box rebooting instead of shutting down when it is powered off during active playback ("schlafe sofort" / shutdown via web UI, button or MQTT while a track is running): the pinned ESP32-audioI2S revision (`a775ccb`) contained a buffer overrun in `Audio::stereo2mono()` - the loop ran to `len * 2` over a buffer holding `len` samples, corrupting the heap behind the audio work buffer. The shutdown path deletes the `Audio` object while the decode task is still running, so with mono playback enabled (web UI: "Mono Lautsprecher") the corrupted heap crashed the ESP32 into a watchdog reboot right before deep sleep; without music playing the destructor ran on an idle decode task and the shutdown worked. The library pin in `platformio.ini` is updated to `61a6f63`, the merge of upstream `schreibfaul1/ESP32-audioI2S` master into the 16-bit output line, which includes the out-of-bounds fix from [PR #1391](https://github.com/schreibfaul1/ESP32-audioI2S/pull/1391) (thanks to @joker-mik). Report and root-cause analysis: [forum #4724](https://forum.espuino.de/t/absturz-beim-beenden/4724).
+
 ## Version 3.1 (19.09.2026)
 
 * 18.09.2026: Optionally speak a warning when the battery runs low, instead of only blinking the LEDs - nobody looks at the ring while a story is playing. Playback is interrupted for the announcement and resumes at exactly the position it left off, while title, position and progress stay frozen so neither the web interface nor MQTT sees the interruption. Off by default; set it up under General -> Power, ready-made announcements in German, English and French ship in `announcements/` (#463). Idea and discussion: [forum #4766](https://forum.espuino.de/t/ansage-wenn-akku-fast-leer/4766).
