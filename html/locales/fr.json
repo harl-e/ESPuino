@@ -548,6 +548,7 @@
 				"mfrc522_spi": "MFRC522 (SPI)",
 				"mfrc522_i2c": "MFRC522 (I2C)",
 				"pn5180": "PN5180",
+				"clrc663_spi": "CLRC663 (SPI)",
 				"description": "Sélectionnez le type de lecteur RFID connecté à votre ESPuino. La détection automatique tentera de déterminer le type de lecteur connecté automatiquement."
 			},
 			"pn5180Lpcd": "Activer PN5180 LPCD",
@@ -558,6 +559,9 @@
 			"mfrc522ScanIntervalExp": "Durée en millisecondes entre deux interrogations du lecteur RFID MFRC522. Un redémarrage est nécessaire pour qu'une modification prenne effet. La valeur par défaut est 100ms.",
 			"pn5180Debounce": "Anti-rebond PN5180",
 			"pn5180DebounceExp": "Durée en millisecondes pendant laquelle une carte doit rester non détectée avant d'être considérée comme retirée. Évite que de brèves pertes de lecture (par ex. avec un écart plus important entre la carte et le lecteur) soient interprétées à tort comme un retrait de carte. Un redémarrage est nécessaire pour qu'une modification prenne effet. La valeur par défaut est 500ms.",
+			"clrc663Version": "Version de puce CLRC663",
+			"clrc663Debounce": "Anti-rebond CLRC663",
+			"clrc663DebounceExp": "Temps en millisecondes pendant lequel une carte doit cesser d’être détectée en continu avant d’être déclarée retirée. Empêche que de brèves interruptions de lecture (par exemple avec une distance plus grande entre la carte et le lecteur) soient traitées comme un retrait de carte. Un redémarrage est nécessaire pour qu’une modification prenne effet. Par défaut : 500ms.",
 			"slixPrivacyPassword": "Mot de passe de confidentialité ICODE-SLIX2",
 			"slixPrivacyPasswordExp": "Mot de passe de quatre octets utilisé pour désactiver le mode confidentialité des tags ICODE-SLIX2 protégés. Seules les valeurs hexadécimales de 00 à FF sont acceptées.",
 			"pn5180Firmware": "Firmware PN5180 lue",

@@ -21,6 +21,12 @@ extern void RfidPn5180_Exit(void);
 extern void RfidPn5180_TaskReset(void);
 extern void RfidPn5180_WakeupCheck(void);
 
+extern void RfidClrc663_Init(void);
+extern void RfidClrc663_Cyclic(void);
+extern void RfidClrc663_Exit(void);
+extern void RfidClrc663_TaskReset(void);
+extern void RfidClrc663_WakeupCheck(void);
+
 TaskHandle_t rfidTaskHandle = NULL;
 
 void Rfid_Init(void) {
@@ -29,6 +35,8 @@ void Rfid_Init(void) {
 	RfidReaderType readerType = RfidConfig_GetReaderType();
 	if ((readerType == RfidReaderType::TYPE_MFRC522_SPI) || (readerType == RfidReaderType::TYPE_MFRC522_I2C)) {
 		RfidMfrc522_Init(readerType);
+	} else if (readerType == RfidReaderType::TYPE_CLRC663_SPI) {
+		RfidClrc663_Init();
 	} else {
 		RfidPn5180_Init();
 	}
@@ -64,6 +72,8 @@ void Rfid_Cyclic(void) {
 #if defined(RFID_READER_TYPE_RUNTIME)
 	if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_PN5180) {
 		RfidPn5180_Cyclic();
+	} else if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_CLRC663_SPI) {
+		RfidClrc663_Cyclic();
 	} else {
 		RfidMfrc522_Cyclic();
 	}
@@ -75,6 +85,8 @@ void Rfid_Exit(void) {
 	Log_Println("shutdown rfid-reader..", LOGLEVEL_NOTICE);
 	if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_PN5180) {
 		RfidPn5180_Exit();
+	} else if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_CLRC663_SPI) {
+		RfidClrc663_Exit();
 	} else {
 		RfidMfrc522_Exit();
 	}
@@ -87,6 +99,8 @@ void Rfid_TaskReset(void) {
 #if defined(RFID_READER_TYPE_RUNTIME)
 	if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_PN5180) {
 		RfidPn5180_TaskReset();
+	} else if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_CLRC663_SPI) {
+		RfidClrc663_TaskReset();
 	} else {
 		RfidMfrc522_TaskReset();
 	}
@@ -97,6 +111,8 @@ void Rfid_WakeupCheck(void) {
 #if defined(RFID_READER_TYPE_RUNTIME)
 	if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_PN5180) {
 		RfidPn5180_WakeupCheck();
+	} else if (RfidConfig_GetReaderType() == RfidReaderType::TYPE_CLRC663_SPI) {
+		RfidClrc663_WakeupCheck();
 	} else {
 		RfidMfrc522_WakeupCheck();
 	}

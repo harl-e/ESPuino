@@ -548,6 +548,7 @@
 				"mfrc522_spi": "MFRC522 (SPI)",
 				"mfrc522_i2c": "MFRC522 (I2C)",
 				"pn5180": "PN5180",
+				"clrc663_spi": "CLRC663 (SPI)",
 				"description": "Wähle den Typ des RFID-Readers. Auto-detect wird versuchen, den Reader automatisch zu erkennen."
 			},
 			"pn5180Lpcd": "PN5180 LPCD aktivieren",
@@ -558,6 +559,9 @@
 			"mfrc522ScanIntervalExp": "Zeit in Millisekunden zwischen zwei Abfragen des MFRC522 RFID-Readers. Ein Neustart ist nötig, damit eine Änderung wirksam wird. Standard ist 100ms.",
 			"pn5180Debounce": "PN5180 Debounce",
 			"pn5180DebounceExp": "Zeit in Millisekunden, die eine Karte ununterbrochen nicht erkannt werden muss, bevor sie als entfernt gilt. Verhindert, dass kurze Leseaussetzer (z.B. bei größerem Abstand zwischen Karte und Leser) fälschlich als Kartenentfernung gewertet werden. Ein Neustart ist nötig, damit eine Änderung wirksam wird. Standard ist 500ms.",
+			"clrc663Version": "CLRC663 Chip-Version",
+			"clrc663Debounce": "CLRC663 Debounce",
+			"clrc663DebounceExp": "Zeit in Millisekunden, die eine Karte ununterbrochen nicht erkannt werden muss, bevor sie als entfernt gilt. Verhindert, dass kurze Leseaussetzer fälschlich als Kartenentfernung gewertet werden. Ein Neustart ist nötig, damit eine Änderung wirksam wird. Standard ist 500ms.",
 			"slixPrivacyPassword": "ICODE-SLIX2 Privacy-Passwort",
 			"slixPrivacyPasswordExp": "Vier-Byte-Passwort zum Deaktivieren des Privacy-Modus geschützter ICODE-SLIX2-Tags. Es sind ausschließlich Hexadezimalwerte von 00 bis FF zulässig.",
 			"pn5180Firmware": "Ausgelesene PN5180 Firmware",
