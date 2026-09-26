@@ -547,6 +547,7 @@
 				"mfrc522_spi": "MFRC522 (SPI)",
 				"mfrc522_i2c": "MFRC522 (I2C)",
 				"pn5180": "PN5180",
+				"clrc663_spi": "CLRC663 (SPI)",
 				"description": "Select the type of RFID reader connected to your ESPuino. Auto-detect will try to determine the connected reader type automatically."
 			},
 			"pn5180Lpcd": "Enable PN5180 LPCD",
@@ -557,9 +558,13 @@
 			"mfrc522ScanIntervalExp": "Time in milliseconds between two polls of the MFRC522 RFID reader. A restart is required for a change to take effect. Default is 100ms.",
 			"pn5180Debounce": "PN5180 debounce",
 			"pn5180DebounceExp": "Time in milliseconds a card must go undetected before it's considered removed. Prevents brief read dropouts (e.g. with a larger gap between card and reader) from being mistaken for card removal. A restart is required for a change to take effect. Default is 500ms.",
+			"clrc663Version": "CLRC663 chip version",
+			"clrc663Debounce": "CLRC663 debounce",
+			"clrc663DebounceExp": "Time in milliseconds a card must continuously fail to be detected before it is declared removed. Prevents short read dropouts (e.g. with a larger distance between card and reader) from being treated as card removal. A restart is required for a change to take effect. Default is 500ms.",
 			"slixPrivacyPassword": "ICODE-SLIX2 privacy password",
 			"slixPrivacyPasswordExp": "Four-byte password used to disable privacy mode on protected ICODE-SLIX2 tags. Only hexadecimal values from 00 to FF are accepted.",
-			"pn5180Firmware": "PN5180 firmware readout"
+			"pn5180Firmware": "PN5180 firmware readout",
+			"pn5180LpcdFirmwareWarning": "LPCD is enabled but this PN5180 firmware is older than 4.0. LPCD will not be armed on shutdown; the device will only wake via button. Update the PN5180 firmware to 4.0 or newer."
 		},
 		"options": {
 			"title": "Options",

@@ -182,7 +182,7 @@ unless `NO_SDCARD` hasn't been enabled previously). However, there are two modes
 interface µSD cards: SPI and SDMMC (1 bit). Be advised that SDMMC is twice as fast as SPI and
 needs one GPIO less. So basically it's a no-brainer and SDMMC is used for "ESPuino Complete".
 
-## Which RFID-reader: RC522 or PN5180?
+## Which RFID-reader: RC522, PN5180 or CLRC663?
 
 RC522 is in a way the ESPuino standard: it's cheap and works, but RFID tags have to be placed close
 to the reader. PN5180 instead has better RFID range/sensitivity and can read ISO-15693 / iCode
@@ -191,6 +191,14 @@ the a RFID tag (after flashing PN5180 with a new firmware). This feature is call
 Disadvantages PN5180: it's more expensive and needs more GPIOs (6/7 instead of 4). In my opinion
 it's worth it! Refer to PN5180's wiring section below for further information. Hint: if using 3.3 V
 only make sure to connect these 3.3 V to PN5180's 5 V AND 3.3 V. Sounds weird but it's necessary.
+
+As an alternative to the PN5180, a CLRC663 breakout (SPI, as delivered) is supported as a third
+reader type. It also reads ISO-14443 and ISO-15693 tags (including the SLIX2 privacy password, so
+'Tonies' work the same way) and is runtime-selectable/auto-detected just like the other readers.
+It shares the PN5180's SPI wiring (MOSI/MISO/SCK/CS); the BUSY pin is not needed, connect the
+module's SD/shutdown pin to GND. LPCD (waking the ESPuino from deep sleep by card) is not
+supported on CLRC663 - wake-up falls back to the button. The chip version and a removal debounce
+are shown/configurable in the web interface (General -> RFID reader).
 
 ## 3.3 V only or 5 V, too? (for developers)
 

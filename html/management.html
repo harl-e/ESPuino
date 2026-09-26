@@ -1707,6 +1707,7 @@
 											<option value="1" data-i18n="general.rfid.readerType.mfrc522_spi">MFRC522 (SPI)</option>
 											<option value="2" data-i18n="general.rfid.readerType.mfrc522_i2c">MFRC522 (I2C)</option>
 											<option value="3" data-i18n="general.rfid.readerType.pn5180">PN5180</option>
+											<option value="4" data-i18n="general.rfid.readerType.clrc663_spi">CLRC663 (SPI)</option>
 										</select>
 									</div>
 									<div class="col-sm-8 offset-sm-4">
@@ -1750,6 +1751,7 @@
 									<div class="col-sm-4 col-form-label" data-i18n="general.rfid.pn5180Firmware"></div>
 									<div class="col-sm-8">
 										<div class="form-control-plaintext" id="pn5180FirmwareValue">—</div>
+										<div class="text-danger small d-none" id="pn5180LpcdFirmwareWarning" data-i18n="general.rfid.pn5180LpcdFirmwareWarning"></div>
 									</div>
 								</div>
 								<div class="row mb-2 align-items-center">
@@ -1790,6 +1792,28 @@
 											<div class="col-3"><input type="text" class="form-control slix-password-byte text-uppercase" id="slixPrivacyPassword2" maxlength="2" pattern="[0-9A-Fa-f]{2}" autocomplete="off" spellcheck="false"></div>
 											<div class="col-3"><input type="text" class="form-control slix-password-byte text-uppercase" id="slixPrivacyPassword3" maxlength="2" pattern="[0-9A-Fa-f]{2}" autocomplete="off" spellcheck="false"></div>
 										</div>
+									</div>
+								</div>
+							</div>
+							<div class="settings-group-card mt-3" id="clrc663Settings" style="display:none">
+							<h5 class="mb-3">CLRC663</h5>
+								<div class="row mb-2 align-items-center">
+									<div class="col-sm-4 col-form-label" data-i18n="general.rfid.clrc663Version"></div>
+									<div class="col-sm-8">
+										<div class="form-control-plaintext" id="clrc663VersionValue">—</div>
+									</div>
+								</div>
+								<div class="row mb-2 align-items-center">
+									<div class="col-sm-4 d-flex align-items-center gap-2">
+										<label for="clrc663Debounce" class="col-form-label"
+												data-i18n="general.rfid.clrc663Debounce"></label>
+										<a class="link-secondary" data-bs-toggle="popover"
+												data-i18n="[data-bs-content]general.rfid.clrc663DebounceExp" tabindex="0">
+											<i class="fas fa-circle-question"></i></a>
+									</div>
+									<div class="col-sm-8">
+										<input type="number" class="form-control" id="clrc663Debounce" name="clrc663Debounce"
+												min="0" max="2000" step="10">
 									</div>
 								</div>
 							</div>
@@ -4495,14 +4519,21 @@
 
 		async function updatePn5180FirmwareInfo() {
 			const firmwareValue = $('#pn5180FirmwareValue');
+			const lpcdWarning = $('#pn5180LpcdFirmwareWarning');
 			try {
 				const response = await fetch("http://" + host + "/settings?section=rfidstatus");
 				if (!response.ok) throw new Error(response.statusText);
 				const data = await response.json();
 				const firmware = data.rfidStatus && data.rfidStatus.pn5180Firmware;
 				firmwareValue.text(firmware || '—');
+				const lpcdUnsupported = !!(data.rfidStatus && data.rfidStatus.pn5180LpcdUnsupported);
+				lpcdWarning.toggleClass('d-none', !lpcdUnsupported);
+				const clrcVersion = data.rfidStatus && data.rfidStatus.clrc663Version;
+				$('#clrc663VersionValue').text(clrcVersion || '—');
 			} catch (err) {
 				firmwareValue.text('—');
+				lpcdWarning.addClass('d-none');
+				$('#clrc663VersionValue').text('—');
 			}
 		}
 
@@ -4511,12 +4542,14 @@
 			const isAutoDetect = readerType === 0;
 			const isMfrc522 = readerType === 1 || readerType === 2;
 			const isPn5180 = readerType === 3;
+			const isClrc663 = readerType === 4;
 
 			$('#mfrc522Settings').toggle(isAutoDetect || isMfrc522);
 			$('#pn5180Settings').toggle(isAutoDetect || isPn5180);
+			$('#clrc663Settings').toggle(isClrc663);
 
 			// LPCD only applies to PN5180.
-			if (isMfrc522) {
+			if (isMfrc522 || isClrc663) {
 				$('#pn5180Lpcd').prop('checked', false);
 			}
 		}
@@ -4561,6 +4594,7 @@
 				$('#mfrc522Gain').val(genSettings.mfrc522Gain);
 				$('#mfrc522ScanInterval').val(genSettings.mfrc522ScanInterval);
 				$('#pn5180Debounce').val(genSettings.pn5180Debounce);
+				$('#clrc663Debounce').val(genSettings.clrc663Debounce);
 				setSlixPrivacyPassword(genSettings.slixPrivacyPassword);
 				updateRfidReaderSettings();
 			}
@@ -5187,6 +5221,7 @@
 					mfrc522Gain: Number($('#mfrc522Gain').val()),
 					mfrc522ScanInterval: Number($('#mfrc522ScanInterval').val()),
 					pn5180Debounce: Number($('#pn5180Debounce').val()),
+					clrc663Debounce: Number($('#clrc663Debounce').val()),
 					slixPrivacyPassword: getSlixPrivacyPassword()
 				},
 				"led": {

@@ -22,6 +22,7 @@
 #include "MemX.h"
 #include "Mqtt.h"
 #include "Rfid.h"
+#include "RfidClrc663.h"
 #include "RfidPn5180.h"
 #include "RotaryEncoder.h"
 #include "SdCard.h"
@@ -820,6 +821,7 @@ WebsocketCodeType JSONToSettings(JsonObject doc) {
 		success = success && (gPrefsRfid.putUChar("mfrc522Gain", generalObj["mfrc522Gain"].as<uint8_t>()) != 0);
 		success = success && (gPrefsRfid.putUShort("rfidScanIntv", generalObj["mfrc522ScanInterval"].as<uint16_t>()) != 0);
 		success = success && (gPrefsRfid.putUShort("pn5180Debounce", generalObj["pn5180Debounce"].as<uint16_t>()) != 0);
+		success = success && (gPrefsRfid.putUShort("clrc663Debounce", generalObj["clrc663Debounce"].as<uint16_t>()) != 0);
 
 		// Keep compatibility with older cached management pages: if the field is missing,
 		// preserve the password already stored in NVS instead of overwriting it.
@@ -1279,6 +1281,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		generalObj["mfrc522Gain"].set(gPrefsRfid.getUChar("mfrc522Gain", 7)); // MFRC522_GAIN
 		generalObj["mfrc522ScanInterval"].set(gPrefsRfid.getUShort("rfidScanIntv", 100)); // RFID_SCAN_INTERVAL
 		generalObj["pn5180Debounce"].set(gPrefsRfid.getUShort("pn5180Debounce", 500)); // PN5180 debounce (ms)
+		generalObj["clrc663Debounce"].set(gPrefsRfid.getUShort("clrc663Debounce", 500)); // CLRC663 debounce (ms)
 
 		const String slixPasswordHex = slixPrivacyPasswordToHex(slixPrivacyPasswordFromPrefs());
 		generalObj["slixPrivacyPassword"].set(slixPasswordHex);
@@ -1297,6 +1300,15 @@ static void settingsToJSON(JsonObject obj, const String section) {
 			rfidStatusObj["pn5180Firmware"].set(firmwareVersion);
 		} else {
 			rfidStatusObj["pn5180Firmware"].set("");
+		}
+		rfidStatusObj["pn5180LpcdUnsupported"].set(RfidPn5180_IsLpcdUnsupportedByFirmware());
+		uint8_t clrc663Version = 0;
+		if (RfidClrc663_GetChipVersion(clrc663Version)) {
+			char clrcVersionString[8];
+			snprintf(clrcVersionString, sizeof(clrcVersionString), "0x%02X", clrc663Version);
+			rfidStatusObj["clrc663Version"].set(clrcVersionString);
+		} else {
+			rfidStatusObj["clrc663Version"].set("");
 		}
 	}
 	if ((section == "") || (section == "equalizer")) {
@@ -1463,6 +1475,7 @@ static void settingsToJSON(JsonObject obj, const String section) {
 		genSettings["mfrc522Gain"].set(7u); // MFRC522_GAIN default (max gain)
 		genSettings["mfrc522ScanInterval"].set(100u); // RFID_SCAN_INTERVAL default
 		genSettings["pn5180Debounce"].set(500u); // PN5180 debounce (ms) default
+		genSettings["clrc663Debounce"].set(500u); // CLRC663 debounce (ms) default
 		genSettings["slixPrivacyPassword"].set(slixPrivacyPasswordToHex(SLIX_PRIVACY_PASSWORD_DEFAULT));
 		JsonObject eqSettings = defaultsObj["equalizer"].to<JsonObject>();
 		eqSettings["gainHighPass"].set(0);

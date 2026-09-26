@@ -60,6 +60,7 @@
 	// 1 = MFRC522 (SPI)
 	// 2 = MFRC522 (I2C)
 	// 3 = PN5180
+	// 4 = CLRC663 (SPI)
 	#define RFID_READER_TYPE_RUNTIME 0    // Default to Auto-detect
 
 	#if defined(RFID_READER_TYPE_RUNTIME)

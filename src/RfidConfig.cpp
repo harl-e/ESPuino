@@ -6,6 +6,7 @@
 #include "MemX.h"
 #include "System.h"
 
+#include <CLRC663.h>
 #include <MFRC522.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -44,6 +45,7 @@ void RfidConfig_Init(void) {
 		activeRfidReaderType,
 		activeRfidReaderType == RfidReaderType::TYPE_MFRC522_SPI ? "MFRC522 (SPI)" : activeRfidReaderType == RfidReaderType::TYPE_MFRC522_I2C ? "MFRC522 (I2C)"
 			: activeRfidReaderType == RfidReaderType::TYPE_PN5180																			  ? "PN5180"
+			: activeRfidReaderType == RfidReaderType::TYPE_CLRC663_SPI													  ? "CLRC663 (SPI)"
 																																			  : "Unknown");
 }
 
@@ -60,6 +62,11 @@ RfidReaderType RfidConfig_AutoDetectReader(void) {
 		return RfidReaderType::TYPE_PN5180;
 	}
 
+
+	if (RfidConfig_IsReaderAvailable(RfidReaderType::TYPE_CLRC663_SPI)) {
+		Log_Println("RFID: CLRC663 (SPI) reader detected", LOGLEVEL_INFO);
+		return RfidReaderType::TYPE_CLRC663_SPI;
+	}
 	if (RfidConfig_IsReaderAvailable(RfidReaderType::TYPE_MFRC522_SPI)) {
 		Log_Println("RFID: MFRC522 (SPI) reader detected", LOGLEVEL_INFO);
 		return RfidReaderType::TYPE_MFRC522_SPI;
@@ -137,6 +144,28 @@ bool RfidConfig_IsReaderAvailable(RfidReaderType readerType) {
 				bool present = ok && (buffer[1] >= 0x01 && buffer[1] <= 0x63) && !(buffer[0] == 0xFF && buffer[1] == 0xFF);
 				if (!present) {
 					Log_Println("RFID: PN5180 not present or unreadable", LOGLEVEL_DEBUG);
+				}
+				return present;
+			}
+
+		case RfidReaderType::TYPE_CLRC663_SPI: // CLRC663
+			// Try to initialize CLRC663 and check if it responds
+			{
+				Log_Println("RFID: Checking CLRC663...", LOGLEVEL_DEBUG);
+				CLRC663 clrc663(&SPI, RFID_CS, RFID_RST);
+				SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_CS);
+				clrc663.begin();
+				uint8_t version = clrc663.getVersion();
+				SPI.end();
+				Log_Printf(LOGLEVEL_DEBUG, "RFID: CLRC663 version=0x%02X", version);
+
+				// CLRC663 is present if the version register is readable and plausible.
+				// The CLRC663 family reports 0x60 (CLRC663), 0x51 (CLRC663 plus), 0x49 (CLRC66303) or
+				// 0x48 (CLRC66301/02); MFRC630 reports 0x18. 0x00/0xFF indicate an unconnected or
+				// floating SPI bus, which must not be mistaken for a present reader.
+				bool present = (version == 0x60) || (version == 0x51) || (version == 0x49) || (version == 0x48) || (version == 0x18);
+				if (!present) {
+					Log_Println("RFID: CLRC663 not present or unreadable", LOGLEVEL_DEBUG);
 				}
 				return present;
 			}
