@@ -77,6 +77,15 @@ bool MediaHub_ForceRefreshAll();
 // of the AutoSync enrollment setting and intentionally never starts playback.
 void MediaHub_SyncLocalManifests();
 
+// Background assignment refresh for AutoSync-enrolled cards (concept §9/§11):
+// a locally known card is played without contacting a hub, so a changed
+// hub-side assignment (folder or play mode) would never reach the NVS entry
+// AutoSync once wrote. Spawns a short-lived task that re-syncs the card's
+// cached manifest and re-persists the local assignment; returns immediately
+// and never blocks or interrupts the tap's playback. No-op when offline,
+// AutoSync is disabled, or the card has no local manifest cache.
+void MediaHub_TryStartAssignmentCheck(const char *cardId);
+
 // Same wipe as MediaHub_ForceRefresh(), but the card isn't coming back: for
 // the DELETE /rfid cascade (concept §13.1), called in addition to removing
 // the NVS entry. `path` is the card's NVS path field, see above.

@@ -1973,6 +1973,25 @@ static MediaHub_ManifestHubResult MediaHub_FindManifestHub(JsonDocument &manifes
 	return cachedUrl.length() == 0 ? MediaHub_ManifestHubResult::MissingUrl : MediaHub_ManifestHubResult::MissingKey;
 }
 
+// Manifest cache paths that could belong to one card: the flat legacy path
+// plus every configured hub's keyed directory. Existing files winnow the
+// list, so unknown cards cost one exists() per configured hub at most.
+static std::vector<String> MediaHub_CandidateManifestPaths(const char *cardId) {
+	std::vector<String> paths;
+	const String flat = MediaHub_ManifestCachePath(cardId);
+	if (gFSystem.exists(flat)) {
+		paths.push_back(flat);
+	}
+	for (const MediaHubServer &server : MediaHub_GetServers()) {
+		const String hostPort = String(server.https ? "https://" : "http://") + server.hostPort;
+		const String keyed = MediaHub_ManifestCachePath(cardId, hostPort);
+		if (keyed != flat && gFSystem.exists(keyed)) {
+			paths.push_back(keyed);
+		}
+	}
+	return paths;
+}
+
 // Synchronizes a cached manifest without using AudioPlayer. Existing playback
 // continues untouched; the established foreground download/.part mechanism is
 // reused because it is the only SD/network transfer path already safe here.
@@ -2138,6 +2157,55 @@ void MediaHub_SyncLocalManifests() {
 	} else {
 		System_IndicateError();
 	}
+}
+
+// Assignment refresh for AutoSync-enrolled cards: RfidCommon deliberately
+// plays a locally known card without contacting a hub, so a changed hub-side
+// assignment (different folder or play mode) would never reach the NVS
+// entry this mechanism once wrote. This check runs entirely in the
+// background after a tap: it reuses the maintenance sync path
+// (MediaHub_SyncCachedManifest), which already compares version/play mode
+// and re-persists the local assignment while preserving play positions.
+// Never blocks or interrupts the tap's playback; on any failure the local
+// assignment simply stays as-is and the next tap retries.
+struct MediaHub_AssignmentCheckArgs {
+	String cardId;
+};
+
+static void MediaHub_AssignmentCheckTask(void *pvParameters) {
+	auto *args = static_cast<MediaHub_AssignmentCheckArgs *>(pvParameters);
+
+	for (const String &manifestPath : MediaHub_CandidateManifestPaths(args->cardId.c_str())) {
+		uint16_t downloads = 0;
+		bool changed = false;
+		if (MediaHub_SyncCachedManifest(manifestPath, downloads, changed)) {
+			if (changed) {
+				Log_Printf(LOGLEVEL_NOTICE, "MediaHub: assignment updated in background for card=%s", args->cardId.c_str());
+			}
+		} else {
+			Log_Printf(LOGLEVEL_NOTICE, "MediaHub: background assignment check failed for card=%s, keeping local assignment", args->cardId.c_str());
+		}
+	}
+
+	delete args;
+	vTaskDelete(NULL);
+}
+
+// Spawns MediaHub_AssignmentCheckTask() and returns immediately. No-op when
+// offline, AutoSync is disabled, or the card has no manifest cache (i.e. it
+// was never enrolled via AutoSync and is not an explicit MediaHub card).
+void MediaHub_TryStartAssignmentCheck(const char *cardId) {
+	if (cardId == nullptr || strlen(cardId) == 0 || !MediaHub_IsAutoSyncEnabled() || !Wlan_IsConnected()) {
+		return;
+	}
+	if (MediaHub_DownloadBusy.load(std::memory_order_relaxed) || MediaHub_SyncBusy.load(std::memory_order_relaxed)) {
+		return; // a running sync/maintenance pass will pick the change up anyway
+	}
+	if (MediaHub_CandidateManifestPaths(cardId).empty()) {
+		return;
+	}
+	auto *args = new MediaHub_AssignmentCheckArgs {String(cardId)};
+	xTaskCreatePinnedToCore(MediaHub_AssignmentCheckTask, "MediaHubAsgnChk", 4096, args, 1, NULL, 1);
 }
 
 bool MediaHub_MoveServer(const String &name, int8_t direction) {
