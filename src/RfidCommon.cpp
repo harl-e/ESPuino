@@ -123,7 +123,10 @@ void Rfid_PreferenceLookupHandler(void) {
 				// AutoSync is intentionally limited to locally unknown cards (the
 				// early branch above). Once enrollment persisted this normal NVS
 				// assignment, every later tap must use ESPuino's duplicate/resume/
-				// playback path without contacting a MediaHub.
+				// playback path without contacting a MediaHub for playback. A
+				// background assignment check still lets a changed hub-side
+				// assignment reach the NVS entry; it never delays this tap.
+				MediaHub_TryStartAssignmentCheck(gCurrentRfidTagId);
 				if (gPlayProperties.dontAcceptRfidTwice) {
 					if (strncmp(gCurrentRfidTagId, gOldRfidTagId, 12) == 0) {
 						// If pause is active, resume playback when the same RFID is put on again.
